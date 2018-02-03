@@ -37,6 +37,8 @@ orchagent_SOURCES = \
         switchorch.cpp \
 		    pfcwdorch.cpp \
 		    pfcactionhandler.cpp \
+		    vnetroutetunnelorch.cpp \
+		    vnetroutetunnelorch.h \
 		    acltable.h \
 		    aclorch.h \
 		    bufferorch.h \
