@@ -24,7 +24,7 @@ enum class PfcWdAction
 };
 
 typedef array<uint64_t, PFC_WD_TC_MAX> PfcFrameCounters;
-typedef array<uint64_t, PFC_WD_TC_MAX> QueueMcDropCounters;
+typedef vector<uint64_t> QueueMcDropCounters;
 
 template <typename DropHandler, typename ForwardHandler>
 class PfcWdOrch: public Orch
@@ -61,7 +61,7 @@ private:
     shared_ptr<DBConnector> m_countersDb = nullptr;
     shared_ptr<Table> m_countersTable = nullptr;
 
-    map<sai_object_id_t, pair<PfcFrameCounters, QueueMcDropCounters>> m_pfcFrameCountersMap;
+    map<sai_object_id_t, pair<PfcFrameCounters, QueueMcDropCounters>> m_CountersMap;
 };
 
 template <typename DropHandler, typename ForwardHandler>
