@@ -43,14 +43,14 @@ PfcWdOrch<DropHandler, ForwardHandler>::PfcWdOrch(DBConnector *db, vector<string
 }
 
 template <typename DropHandler, typename ForwardHandler>
-QueueMcDropCounters PfcWdOrch<DropHandler, ForwardHandler>::getQueueMcDropCounters(
+QueueMcCounters PfcWdOrch<DropHandler, ForwardHandler>::getQueueMcCounters(
         const Port& port,
         uint8_t pfcMask)
 {
     SWSS_LOG_ENTER();
 
     vector<FieldValueTuple> fieldValues;
-    QueueMcDropCounters counters;
+    QueueMcCounters counters;
     RedisClient redisClient(PfcWdOrch<DropHandler, ForwardHandler>::getCountersDb().get());
 
     for (uint8_t prio = 0; prio < port.m_queue_ids.size(); prio++)
@@ -64,7 +64,7 @@ QueueMcDropCounters PfcWdOrch<DropHandler, ForwardHandler>::getQueueMcDropCounte
             continue;
         }
 
-        uint64_t drops = numeric_limits<uint64_t>::max();
+        uint64_t pkts = numeric_limits<uint64_t>::max();
         for (const auto& fv : fieldValues)
         {
             const auto field = fvField(fv);
@@ -72,10 +72,10 @@ QueueMcDropCounters PfcWdOrch<DropHandler, ForwardHandler>::getQueueMcDropCounte
 
             if (field == "SAI_QUEUE_STAT_PACKETS")
             {
-                drops = stoul(value);
+                pkts = stoul(value);
             }
         }
-        counters.push_back(drops);
+        counters.push_back(pkts);
     }
 
     return move(counters);
@@ -155,7 +155,7 @@ void PfcWdOrch<DropHandler, ForwardHandler>::doTask(SelectableTimer &timer)
         }
 
         uint8_t pfcMask = attr.value.u8;
-        auto newMcCounters = getQueueMcDropCounters(port, pfcMask);
+        auto newMcCounters = getQueueMcCounters(port, pfcMask);
 
         for (size_t prio = 0; prio != counters.size(); prio++)
         {
@@ -180,7 +180,7 @@ void PfcWdOrch<DropHandler, ForwardHandler>::doTask(SelectableTimer &timer)
             bool isLossy = ((1 << prio) & pfcMask) == 0;
             if (newMcCounters[prio] == numeric_limits<uint64_t>::max())
             {
-                SWSS_LOG_WARN("Could not retreive MC drop count on queue %lu port %s",
+                SWSS_LOG_WARN("Could not retreive MC counters on queue %lu port %s",
                         prio,
                         port.m_alias.c_str());
             }
@@ -409,7 +409,7 @@ void PfcWdOrch<DropHandler, ForwardHandler>::createEntry(const string& key,
 
     uint8_t pfcMask = attr.value.u8;
     m_CountersMap.emplace(port.m_port_id,
-            make_pair(getPfcFrameCounters(port.m_port_id), getQueueMcDropCounters(port, pfcMask)));
+            make_pair(getPfcFrameCounters(port.m_port_id), getQueueMcCounters(port, pfcMask)));
 
     SWSS_LOG_NOTICE("Started PFC Watchdog on port %s", port.m_alias.c_str());
 }
