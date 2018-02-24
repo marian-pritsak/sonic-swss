@@ -34,10 +34,13 @@ orchagent_SOURCES = \
 		    fdborch.cpp \
 		    aclorch.cpp \
 		    saihelper.cpp \
-        switchorch.cpp \
+        	switchorch.cpp \
 		    pfcwdorch.cpp \
 		    pfcactionhandler.cpp \
 		    vnetroutetunnelorch.cpp \
+			bmt_common.cpp \
+			bmt_cache_evacuator.cpp \
+			bmt_cache_inserter.cpp \
 		    vnetroutetunnelorch.h \
 		    acltable.h \
 		    aclorch.h \
@@ -58,9 +61,14 @@ orchagent_SOURCES = \
 		    qosorch.h \
 		    routeorch.h \
 		    saihelper.h \
-        switchorch.h \
+        	switchorch.h \
 		    swssnet.h \
-		    tunneldecaporch.h
+		    tunneldecaporch.h \
+			bmt_cache_evacuator.h \
+			bmt_cache_inserter.h \
+			bmt_common.h \
+			bmt_orch_constants.h
+
 
 orchagent_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_SAI)
 orchagent_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_SAI)
