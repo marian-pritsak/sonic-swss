@@ -14,12 +14,17 @@
 extern sai_object_id_t gVirtualRouterId;
 extern sai_object_id_t gUnderlayIfId;
 
-class VnetRouteTunnelOrch : public Orch
+class BmToRCacheOrch : public Orch
 {
 public:
-    VnetRouteTunnelOrch(DBConnector *db, string tableName);
-    // sai_object_id_t getDPDKPort();
+    BmToRCacheOrch(DBConnector *db, vector<string> tableNames);
+    sai_object_id_t getDPDKPort();
 private:
+    void doVnetRouteTunnelTask(Consumer &consumer);
+    void doVnetRouteTask(Consumer &consumer);
+    void doVnetTask(Consumer &consumer);
+    void doVnetIntfTask(Consumer &consumer);
+    void doVxlanTunnelTask(Consumer &consumer);
     void doTask(Consumer &consumer);
     bool tunnel_created;
     sai_object_id_t gTunnelId;
@@ -29,6 +34,7 @@ private:
     sai_object_id_t port_10_oid;
     sai_status_t create_tunnel();
     sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
+    sai_object_id_t sai_get_port_id_by_alias(std::string alias)
     sai_ip4_t gVtepIp;
     uint16_t gVID;
     uint32_t gVNI;
