@@ -1,5 +1,5 @@
-#ifndef SWSS_VNET_ROUTE_TUNNEL_ORCH_H
-#define SWSS_VNET_ROUTE_TUNNEL_ORCH_H
+#ifndef SWSS_BMTOR_CACHE_ORCH_H
+#define SWSS_BMTOR_CACHE_ORCH_H
 
 #include "orch.h"
 #include "portsorch.h"
@@ -12,39 +12,26 @@
 #include <set>
 
 extern sai_object_id_t gVirtualRouterId;
-// extern MacAddress gMacAddress;
-
-// struct IntfsEntry
-// {
-//     std::set<IpPrefix>  ip_addresses;
-//     int                 ref_count;
-// };
-
-// typedef map<string, IntfsEntry> IntfsTable;
+extern sai_object_id_t gUnderlayIfId;
 
 class VnetRouteTunnelOrch : public Orch
 {
 public:
     VnetRouteTunnelOrch(DBConnector *db, string tableName);
-
-    // sai_object_id_t getRouterIntfsId(const string&);
-
-    // void increaseRouterIntfsRefCount(const string&);
-    // void decreaseRouterIntfsRefCount(const string&);
+    // sai_object_id_t getDPDKPort();
 private:
-    // IntfsTable m_syncdIntfses;
     void doTask(Consumer &consumer);
-
-    // int getRouterIntfsRefCount(const string&);
-
-    // bool addRouterIntfs(Port &port);
-    // bool removeRouterIntfs(Port &port);
-
-    // void addSubnetRoute(const Port &port, const IpPrefix &ip_prefix);
-    // void removeSubnetRoute(const Port &port, const IpPrefix &ip_prefix);
-
-    // void addIp2MeRoute(const IpPrefix &ip_prefix);
-    // void removeIp2MeRoute(const IpPrefix &ip_prefix);
+    bool tunnel_created;
+    sai_object_id_t gTunnelId;
+    sai_object_id_t default1Qbridge;
+    sai_object_id_t default_vhost_table_entry;
+    sai_object_id_t dpdk_port;
+    sai_object_id_t port_10_oid;
+    sai_status_t create_tunnel();
+    sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
+    sai_ip4_t gVtepIp;
+    uint16_t gVID;
+    uint32_t gVNI;
 };
 
-#endif /* SWSS_VNET_ROUTE_TUNNEL_ORCH_H */
+#endif /* SWSS_BMTOR_CACHE_ORCH_H */
