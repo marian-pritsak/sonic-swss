@@ -34,7 +34,7 @@ private:
     sai_object_id_t port_10_oid;
     sai_status_t create_tunnel();
     sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
-    sai_object_id_t sai_get_port_id_by_alias(std::string alias)
+    sai_object_id_t sai_get_port_id_by_alias(std::string alias);
     sai_ip4_t gVtepIp;
     uint16_t gVID;
     uint32_t gVNI;

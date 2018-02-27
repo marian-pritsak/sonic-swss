@@ -64,7 +64,7 @@ bool OrchDaemon::init()
         "VNET",         //TODO: ConfigDB
         "VNET_INTF",    //TODO: ConfigDB
         "VXLAN_TUNNEL"  //TODO: ConfigDB
-    }
+    };
 
     gPortsOrch = new PortsOrch(m_applDb, ports_tables);
     gFdbOrch = new FdbOrch(m_applDb, APP_FDB_TABLE_NAME, gPortsOrch);
