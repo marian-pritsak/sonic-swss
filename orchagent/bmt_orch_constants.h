@@ -11,7 +11,7 @@
 #define CONTROL_MTU 1100 //TODO
 #define TYPE_VLAN 0x8100
 #define TYPE_IPV4 0x0800
-#define CACHE_EVAC_SIZE 1 // the number of expected elements in vhost_table.free_offsets
+#define CACHE_EVAC_SIZE (1) // the number of expected elements in vhost_table.free_offsets
 
 
 #endif /** __BMT_ORCH_CONSTANTS_H_ */

@@ -398,7 +398,8 @@ int main(int argc, char **argv)
 
     /** bmt main */
     bmt_init_status_t bmt_common_init;
-    if (bmt_init(bmt_common_init) != 0){
+    memset(&bmt_common_init, 0, sizeof(bmt_common_init));
+    if (bmt_init(&bmt_common_init) != 0){
         cout << "bmt app will not run. SWSS still running." << endl;
         exit(1);
     }
@@ -426,6 +427,6 @@ int main(int argc, char **argv)
           cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
         }
     }
-    bmt_deinit(bmt_common_init);
+    bmt_deinit(&bmt_common_init);
     return 0;
 }

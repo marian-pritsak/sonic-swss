@@ -16,7 +16,7 @@ extern "C" {
 #include <set>
 #include <mutex>
 #include <thread>
-#include "bmt_orch.h"
+#include "bmt_orch_constants.h"
 #include "bmt_cache_inserter.h"
 
 using namespace std;
@@ -24,6 +24,9 @@ extern sai_hostif_api_t sai_hostif_api;
 extern sai_samplepacket_api_t sai_samplepacket_api;
 extern sai_port_api_t sai_port_api;
 extern sai_switch_api_t sai_switch_api;
+extern sai_bmtor_api_t sai_bmtor_api;
+
+mutex cout_mutex;
 
 
 typedef struct bmt_dpdk_pkt_t {
@@ -44,7 +47,7 @@ typedef struct bmt_vhost_entry_t {
     sai_object_id_t tunnel_id;
 }bmt_vhost_entry_t;
 
-// TODO make class.
+
 typedef struct bmt_vhost_table_t {
     sai_object_id_t     Oid;
     bmt_vhost_entry_t   entry[VHOST_TABLE_SIZE];
@@ -67,7 +70,7 @@ sai_object_id_t hostifOid;
 sai_object_id_t hostif_table_entryOid;
 sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
-bool scan_dpdk_port;
+extern bool gScanDpdkPort;
 
 sai_status_t bmt_parse_packet(uint8_t* buffer, sai_size_t buffer_size, uint32_t attr_count, sai_attribute_t sai_packet_attr[3], bmt_dpdk_pkt_t *pkt){
     // omers: assuming vlan(for encoding inport log) + ipv4.
@@ -87,7 +90,7 @@ sai_status_t bmt_parse_packet(uint8_t* buffer, sai_size_t buffer_size, uint32_t 
                 pkt->in_lag = sai_packet_attr[i].value.oid;
                 break;
             default:
-                cout << "fd packet attr was not parsed, id:" << sai_packet_attr[i].id << " ,value: " << sai_packet_attr[i].value << endl;
+                cout << "fd packet attr was not parsed, id:" << sai_packet_attr[i].id << " ,value: " << sai_packet_attr[i].value.oid << endl;
                 return (SAI_STATUS_FAILURE);
         }
     }
@@ -98,11 +101,11 @@ sai_status_t bmt_parse_packet(uint8_t* buffer, sai_size_t buffer_size, uint32_t 
     uint8_t inner_ipv4_ver;
     uint8_t outer_ipv4_ver;
     if (buffer_size >= 84){ // TODO should be 84
-        etherType[0] = ((uint16_t)buffer[12]<<8)|buffer[13]; // outer etherType (tagged)
-        etherType[1] = ((uint16_t)buffer[16]<<8)|buffer[17]; // Vlan etherType
-        etherType[2] = ((uint16_t)buffer[62]<<8)|buffer[63]; // inner etherType
-        outer_ipv4_ver = buffer[18]/8;
-        inner_ipv4_ver = buffer[64]/8;
+        etherType[0] = (uint16_t)(((uint16_t)buffer[12]<<8)|(uint16_t)buffer[13]); // outer etherType (tagged)
+        etherType[1] = (uint16_t)(((int)buffer[16]<<8U)|(int)buffer[17]); // Vlan etherType
+        etherType[2] = (uint16_t)(((int)buffer[62]<<8)|(int)buffer[63]); // inner etherType
+        outer_ipv4_ver = (uint8_t)(buffer[18]>>3);
+        inner_ipv4_ver = (uint8_t)(buffer[64]>>3);
         
 
         if(
@@ -137,7 +140,7 @@ sai_status_t bmt_parse_packet(uint8_t* buffer, sai_size_t buffer_size, uint32_t 
         }
     }
     else{
-        cout << "packet too short:" << size buffer_size <<" bytes, expecting 84 bytes" << endl;
+        cout << "packet too short:" << buffer_size <<" bytes, expecting 84 bytes" << endl;
         return (SAI_STATUS_FAILURE);
     }
     cout << "===============================================================" << endl;
@@ -156,7 +159,7 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         }
         else{
             cout << "[inserter] WARNING: no avaliable entries is cache, please check eviction."<< endl;
-            return SAI_STATUS_FAILIURE;
+            return SAI_STATUS_FAILURE;
         }
     }
     else{
@@ -175,6 +178,11 @@ sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
 }
 
 sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_dip, uint32_t underlay_dip, sai_object_id_t tunnel_id){
+
+    uint32_t offset;
+    sai_status_t status = bmt_get_free_offset(&offset);
+    if (status != SAI_STATUS_SUCCESS){ return status; }
+
     sai_attribute_t attr[7];
     // TODO can be defined as a global to save time for those fixed arributes, and change only few attrs.
     attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
@@ -200,22 +208,20 @@ sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_d
     attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_TUNNEL_ID;
     attr[6].value.oid = tunnel_id;
 
-    uint32_t offset;
-    sai_status_t status = bmt_get_free_offset(&offset);
-    if (status != SAI_STATUSS_SUCCESS){ return status; }
-    
-    sai_status_t status = sai_ext_bmtor->sai_create_table_vhost_entry(&vhost_table.entry[offset].entry_id,gSwitchId,7,attr);
-    if (status != SAI_STATUSS_SUCCESS){
-        cout << "[inserter] ERROR: failed to insert vhost rule, rv: " << status << "\noffset" << offset << "\ntunnel" << tunnet_id  << "\nport vec" << port_vect << "\noverlay_dip" << overlay_dip << "\nunderlay_dip" << onderlay_dip << endl;
+	// TODO - ???? 
+    (void)attr;
+    // sai_status_t status = sai_ext_bmtor->sai_create_table_vhost_entry(&vhost_table.entry[offset].entry_id,gSwitchId,7,attr);
+    if (status != SAI_STATUS_SUCCESS){
+        cout << "[inserter] ERROR: failed to insert vhost rule, rv: " << status << "\noffset" << offset << "\ntunnel" << tunnel_id  << "\nport vec" << port_vect << "\noverlay_dip" << overlay_dip << "\nunderlay_dip" << underlay_dip << endl;
         return status;
     }
-    vhost_table.entries[offset] = (bmt_vhost_entry_t) {
-        .overlay_dip = overlay_dip,
-        .underlay_dip = underlay_dip,
-        .port_vect = port_vect,
-        .tunnel_id = tunnel_id;
-    };
-    return SAI_STATUSS_SUCCESS;
+
+    vhost_table.entry[offset].overlay_dip = overlay_dip;
+    vhost_table.entry[offset].underlay_dip = underlay_dip;
+    vhost_table.entry[offset].port_vect = port_vect;
+    vhost_table.entry[offset].tunnel_id = tunnel_id;
+    
+    return SAI_STATUS_SUCCESS;
 }
 
 /* receive flow */
@@ -228,12 +234,12 @@ int bmt_recv(){
     sai_status_t status;
     bmt_dpdk_pkt_t pkt;
 
-    while(scan_dpdk_port)
+    while(gScanDpdkPort)
     { 
         cout << "[inserter] listening..." << endl;
         attr_count = 3;
         buffer_size = CONTROL_MTU;
-        status = sai_hostif_api->recv_hostif_packet(hostifOid, buffer, &buffer_size, &attr_count, sai_packet_attr);
+        status = sai_hostif_api.recv_hostif_packet(hostifOid, buffer, &buffer_size, &attr_count, sai_packet_attr);
         if (status != SAI_STATUS_SUCCESS){
             cout << "[inserter] ERROR: BMtor_dpdk_sampler :  sai_recv_hostif_packet , status "<< status << endl;
             continue;
@@ -242,7 +248,11 @@ int bmt_recv(){
         if (status != SAI_STATUS_SUCCESS){
             cout << "[inserter] ERROR: BMtor_dpdk_sampler :  bmt_parse_packet , status " << status<< endl;
             continue;
-        status = bmt_cache_insert_vhost_entry(uint32_t offset, uint16_t port_vect, uint32_t overlay_dip, uint32_t underlay_dip, sai_object_id_t tunnel_id);
+
+	// TODO - fix parsing
+        uint16_t port_vect = 0; //??
+	sai_object_id_t tunnel_id = 0; //??
+        status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
         }
     }
     cout << "[inserter] INFO: killing process."<< endl;
@@ -268,7 +278,7 @@ int bmt_init_dpdk_traffic_sampler(){
     attr.value.s32 = SAI_SAMPLEPACKET_MODE_EXCLUSIVE; // sample each packet
     packetsampler_attrs.push_back(attr);
 
-    status = sai_samplepacket_api->create_samplepacket(&samplepacketOid,gSwitchId,(uint32_t)packetsampler_attrs.size(),packetsampler_attrs.data());
+    status = sai_samplepacket_api.create_samplepacket(&samplepacketOid,gSwitchId,(uint32_t)packetsampler_attrs.size(),packetsampler_attrs.data());
     if (status != SAI_STATUS_SUCCESS)
     {
         cout << "[inserter] Failed to create samplepacket, rv:" << status << endl;
@@ -280,7 +290,7 @@ int bmt_init_dpdk_traffic_sampler(){
     /* BIND to ingress dpdk port */
     attr.id = SAI_PORT_ATTR_INGRESS_SAMPLEPACKET_ENABLE;
     attr.value.oid=samplepacketOid;
-    status = sai_port_api->set_port_attribute(dpdk_port,&attr);
+    status = sai_port_api.set_port_attribute(dpdk_port,&attr);
     if (status != SAI_STATUS_SUCCESS){
         cout << "[inserter] Failed to bind packet sampler to port, rv:" << status << endl;
         return (5);   
@@ -297,7 +307,7 @@ int bmt_init_dpdk_traffic_sampler(){
 
     //attr.id = SAI_HOSTIF_ATTR_QUEUE; 0 for now
 
-    status = sai_hostif_api->create_hostif(&hostifOid,gSwitchId,(uint32_t)hostif_attrs.size(),hostif_attrs.data());
+    status = sai_hostif_api.create_hostif(&hostifOid,gSwitchId,(uint32_t)hostif_attrs.size(),hostif_attrs.data());
     if (status != SAI_STATUS_SUCCESS)
     {
         cout << "[inserter] Failed to create hostif, rv:" << status << endl;
@@ -312,7 +322,7 @@ int bmt_init_dpdk_traffic_sampler(){
     // attr.value.u32 = 100; // TODO !
     // hostifTrapGroup_attrs.push_back(attr);
     // attr.id = SAI_HOSTIF_TRAP_GROUP_ATTR_POLICER;
-    status = sai_hostif_api->create_hostif_trap_group(&trapGroupOid,gSwitchId,(uint32_t)hostifTrapGroup_attrs.size(),hostifTrapGroup_attrs.data());
+    status = sai_hostif_api.create_hostif_trap_group(&trapGroupOid,gSwitchId,(uint32_t)hostifTrapGroup_attrs.size(),hostifTrapGroup_attrs.data());
     if (status != SAI_STATUS_SUCCESS){
         cout << "[inserter] Failed to creat Hostif Trap group, rv:" << status << endl;
         return (3);
@@ -344,7 +354,7 @@ int bmt_init_dpdk_traffic_sampler(){
         // attr.objlist.count = ;
         // attr.objlist.list  = ;
 
-    status = sai_hostif_api->create_hostif_trap(&samplepackettrapOid, gSwitchId, (uint32_t)trap_attrs.size(), trap_attrs.data());
+    status = sai_hostif_api.create_hostif_trap(&samplepackettrapOid, gSwitchId, (uint32_t)trap_attrs.size(), trap_attrs.data());
     if (status != SAI_STATUS_SUCCESS){
         cout << "[inserter] Failed to create samplepacket Hostif Trap, rv:" << status << endl;
         return (2);
@@ -371,7 +381,7 @@ int bmt_init_dpdk_traffic_sampler(){
     hostif_table_entry_attrs.push_back(attr);
 
 
-    status = sai_hostif_api->create_hostif_table_entry(
+    status = sai_hostif_api.create_hostif_table_entry(
         &hostif_table_entryOid, gSwitchId, (uint32_t)hostif_table_entry_attrs.size(), hostif_table_entry_attrs.data());
     if (status != SAI_STATUS_SUCCESS)
     {
@@ -389,12 +399,13 @@ int bmt_init_dpdk_traffic_sampler(){
 
 int bmt_deinit_dpdk_traffic_sampler(int init_status){
     lock_guard<mutex> guard(cout_mutex);
-    sai_status_t status;
+    sai_status_t status = SAI_STATUS_SUCCESS;
     // TODO remove all entries / delete table and recreate with default entry only !!!!!!
     if (vhost_table.used_entries>0){
-        for(uint32_t i ; i=0; i<vhost_table.used_entries){
-            status = remove_table_vhost_entry(vhost_table.entry[i].entry_id);
-            cout << "[inserter] deleting cache entries, free entries:"
+        for(uint32_t i=0; i<vhost_table.used_entries;i++){
+// TODO
+            // status = remove_table_vhost_entry(vhost_table.entry[i].entry_id);
+            cout << "[inserter] deleting cache entries, free entries:" << endl;
             if (status != SAI_STATUS_SUCCESS)
                 cout << "[inserter] Failed at remove_table_vhost_entry" << i << ", status: "<< status << endl;
         }
@@ -403,25 +414,25 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
 
 
     if (init_status<1){
-        status = sai_hostif_api->remove_hostif_table_entry(hostif_table_entryOid);
+        status = sai_hostif_api.remove_hostif_table_entry(hostif_table_entryOid);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at remove_hostif_table_entry, rv" << status << endl;
     }
 
     if (init_status<2){
-        status = sai_hostif_api->remove_hostif_trap(samplepackettrapOid);
+        status = sai_hostif_api.remove_hostif_trap(samplepackettrapOid);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at remove_hostif_trap, rv" << status << endl;
     }
 
     if (init_status<3){
-        status = sai_hostif_api->remove_hostif_trap_group(trapGroupOid);
+        status = sai_hostif_api.remove_hostif_trap_group(trapGroupOid);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at remove_hostif_trap_group, rv" << status << endl;
     }
 
     if (init_status<4){
-        status = sai_hostif_api->remove_hostif(hostifOid);
+        status = sai_hostif_api.remove_hostif(hostifOid);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at remove_hostif, rv" << status << endl;
     }
@@ -430,13 +441,13 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
         sai_attribute_t attr;
         attr.id = SAI_PORT_ATTR_INGRESS_SAMPLEPACKET_ENABLE;
         attr.value.oid = SAI_NULL_OBJECT_ID;
-        status = sai_port_api->set_port_attribute(dpdk_port,&attr);
+        status = sai_port_api.set_port_attribute(dpdk_port,&attr);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at samplepacket, rv" << status << endl;
     }   
 
     if (init_status<6){
-        status = sai_samplepacket_api->remove_samplepacket(samplepacketOid);
+        status = sai_samplepacket_api.remove_samplepacket(samplepacketOid);
         if (status != SAI_STATUS_SUCCESS)
             cout << "[inserter] Failed at samplepacket, rv" << status << endl;
     }   
@@ -468,7 +479,7 @@ sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port) {
     //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
     sai_attr.value.objlist.count = max_ports;
     sai_attr.value.objlist.list = &new_objlist[0];
-    sai_switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
+    sai_switch_api.get_switch_attribute(gSwitchId, 1, &sai_attr);
     printf("[inserter] port list\n");
 
     sai_attribute_t hw_lane_list_attr;
@@ -479,7 +490,7 @@ sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port) {
         hw_lane_list_attr.value.u32list.list = &hw_port_list[0];
         hw_lane_list_attr.value.u32list.count = 4;
         cout << "[inserter] port sai_object_id " << sai_attr.value.objlist.list[i] << endl;
-        sai_port_api->get_port_attribute(sai_attr.value.objlist.list[i], 1,
+        sai_port_api.get_port_attribute(sai_attr.value.objlist.list[i], 1,
                                         &hw_lane_list_attr);
         printf("[inserter] hw lanes: %d %d %d %d\n", hw_port_list[0], hw_port_list[1], hw_port_list[2], hw_port_list[3]);
         if (hw_port_list[0] == ((hw_port - 1) * 4)) {
@@ -503,10 +514,10 @@ int bmt_cache_inserter()
 
     /* init dpdk port trapping via acl*/
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
-    cout << "[inserter] DEBUG: initialization finished. status: " << init_status << endl;
+    cout << "[inserter] DEBUG: initialization finished. status: " << sampler_init_status << endl;
 
     /* listen to traffic on dpdk port */
-    if (init_status==0) { // only on init success
+    if (sampler_init_status==0) { // only on init success
         bmt_recv(); 
     }
     /* deinit dpdk port trapping via acl*/
@@ -514,4 +525,21 @@ int bmt_cache_inserter()
     int rc = bmt_deinit_dpdk_traffic_sampler(sampler_init_status);
     return(rc);
 
+}
+
+
+int bmt_cache_evacuator(){
+	while (gScanDpdkPort){
+		if ((vhost_table.used_entries > (VHOST_TABLE_SIZE-2)) && vhost_table.free_offsets.size()<CACHE_EVAC_SIZE){
+			// TODO loop over all entries, read counters and catch the mice flows
+			// TODO remove mice entry
+			lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+			uint32_t offset = 0;
+			cout << "INFO: cache evacuator freeing vhost table offset " << offset << endl;
+			sai_bmtor_api.remove_table_vhost_entry(vhost_table.entry[offset].entry_id);
+			vhost_table.free_offsets.push_back(offset);
+		}
+		
+	}
+	return 0;
 }

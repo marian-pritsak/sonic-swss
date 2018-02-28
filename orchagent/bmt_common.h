@@ -7,6 +7,7 @@ extern "C" {
 }
  
 #include <sairedis.h>
+#include <thread>
 
 
 typedef struct bmt_init_status_t{
@@ -28,8 +29,6 @@ typedef struct bmt_init_status_t{
   bool dpdk_bridge_port_created = false;
 } bmt_init_status_t;
 
-
-mutex         cout_mutex;
 
 sai_switch_api_t *switch_api;
 sai_object_id_t g_switch_id;
@@ -67,7 +66,7 @@ sai_object_id_t dpdk_port;
 sai_object_id_t default_1q;
 
 sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
-void  bmt_deinit(bmt_init_status_t bmt_common_init);
-int   bmt_init(bmt_init_status_t bmt_common_init);
+void  bmt_deinit(bmt_init_status_t* bmt_common_init);
+int   bmt_init(bmt_init_status_t* bmt_common_init);
 
 #endif /* __BMT_COMMON_H_ */
