@@ -31,6 +31,9 @@ using namespace std;
 using namespace swss;
 
 extern sai_switch_api_t *sai_switch_api;
+// extern sai_tunnel_api_t *sai_tunnel_api;
+// extern sai_bmtor_api_t *sai_bmtor_api;
+// extern sai_port_api_t *sai_port_api;
 extern sai_router_interface_api_t *sai_router_intfs_api;
 
 #define UNREFERENCED_PARAMETER(P)       (P)
@@ -39,6 +42,7 @@ extern sai_router_interface_api_t *sai_router_intfs_api;
 sai_object_id_t gVirtualRouterId;
 sai_object_id_t gUnderlayIfId;
 sai_object_id_t gSwitchId = SAI_NULL_OBJECT_ID;
+// sai_object_id_t default_vhost_table_entry;
 MacAddress gMacAddress;
 
 #define DEFAULT_BATCH_SIZE  128
@@ -87,7 +91,6 @@ void sighup_handler(int signo)
     }
 }
 
-
 void sig_handler(int signo){
     if (signo == SIGINT){
        gScanDpdkPort=false;
@@ -95,6 +98,97 @@ void sig_handler(int signo){
 
     } 
 }
+
+// sai_object_id_t
+//     sai_get_port_id_by_front_port(uint32_t hw_port)
+// {
+//   sai_object_id_t new_objlist[32]; //TODO change back to getting from switch
+//   sai_attribute_t sai_attr;
+//   sai_attr.id = SAI_SWITCH_ATTR_PORT_NUMBER;
+//   // sai_switch_api->get_swi tch_attribute(switch_id, 1, &sai_attr);
+//   uint32_t max_ports = 32; //sai_attr.value.u32;
+
+//   sai_attr.id = SAI_SWITCH_ATTR_PORT_LIST;
+//   //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
+//   sai_attr.value.objlist.count = max_ports;
+//   sai_attr.value.objlist.list = &new_objlist[0];
+//   sai_switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
+//   // printf("port list\n");
+
+//   sai_attribute_t hw_lane_list_attr;
+
+//   for (uint32_t i = 0; i < max_ports; i++)
+//   {
+//     uint32_t hw_port_list[4];
+//     hw_lane_list_attr.id = SAI_PORT_ATTR_HW_LANE_LIST;
+//     hw_lane_list_attr.value.u32list.list = &hw_port_list[0];
+//     hw_lane_list_attr.value.u32list.count = 4;
+//     // printf("port sai_object_id 0x%" PRIx64 " \n", sai_attr.value.objlist.list[i]);
+//     sai_port_api->get_port_attribute(sai_attr.value.objlist.list[i], 1,
+//                                  &hw_lane_list_attr);
+//     // printf("hw lanes: %d %d %d %d\n", hw_port_list[0], hw_port_list[1], hw_port_list[2], hw_port_list[3]);
+//     if (hw_port_list[0] == ((hw_port - 1) * 4)) // Front panel 1 is 0, 2 is 4, 3 is 8, etc.. (room is left for splits)
+//     {
+//       // free(hw_lane_list_attr.value.u32list.list);
+//       // free(sai_attr.value.objlist.list);
+//       return sai_attr.value.objlist.list[i];
+//     }
+//     // free(hw_lane_list_attr.value.u32list.list);
+//   }
+//   // free(sai_attr.value.objlist.list);
+//   SWSS_LOG_ERROR("Failed to get port %d sai_object_id", hw_port);
+//   throw "BMToR initialization failure";
+//   return -1;
+// }
+
+// void print_stats_loop() {
+//     int j;
+//     sai_bmtor_stat_t counter_ids[2];
+//     counter_ids[0] = SAI_BMTOR_STAT_TABLE_VHOST_HIT_PACKETS;
+//     counter_ids[1] = SAI_BMTOR_STAT_TABLE_VHOST_HIT_OCTETS;
+//     uint64_t counters[2];
+//     sai_status_t status;
+//     for (j=0; j<100; j++) {
+//         std::this_thread::sleep_for(std::chrono::seconds(30));
+//         SWSS_LOG_NOTICE("Reading counters\n");
+//         status = sai_bmtor_api->get_bmtor_stats(default_vhost_table_entry, 2, counter_ids, counters);
+//         if (status != SAI_STATUS_SUCCESS) {
+//             SWSS_LOG_ERROR("Failed to read table_vhost default entry counters");
+//             throw "BMToR counters read failure";
+//         }
+//         SWSS_LOG_NOTICE("%d: Cache miss (DPDK):\n Packets: %" PRId64 ".    Bytes: %" PRId64 ".\n", j, counters[0], counters[1]);
+//     }
+// }
+
+// void init_bmtor() {
+//     SWSS_LOG_NOTICE("init_bmtor: wait 30 seconds");
+//     std::this_thread::sleep_for(std::chrono::seconds(30));
+//     SWSS_LOG_NOTICE("init_bmtor: started");
+//     sai_object_id_t dpdk_port = sai_get_port_id_by_front_port(7);
+//     sai_attribute_t vhost_table_entry_attr[8];
+//     vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
+//     vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
+//     vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
+//     vhost_table_entry_attr[1].value.oid = dpdk_port;
+//     vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
+//     vhost_table_entry_attr[2].value.booldata = true;
+//     // Patch. TODO: need to add condition in header
+//     vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
+//     vhost_table_entry_attr[3].value.u32 = 0;
+//     vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
+//     vhost_table_entry_attr[4].value.u32 = 0;
+//     vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
+//     vhost_table_entry_attr[5].value.u32 = 0;
+//     vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
+//     vhost_table_entry_attr[6].value.u32 = 0;
+
+//     sai_status_t status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
+//     if (status != SAI_STATUS_SUCCESS) {
+//         SWSS_LOG_ERROR("Failed to create table_vhost default entry");
+//         throw "BMToR initialization failure";
+//     }
+//     print_stats_loop();
+// }
 
 int main(int argc, char **argv)
 {
@@ -289,8 +383,9 @@ int main(int argc, char **argv)
             SWSS_LOG_ERROR("Failed to notify syncd APPLY_VIEW %d", status);
             exit(EXIT_FAILURE);
         }
-
+        // std::thread t1(init_bmtor);
         orchDaemon->start();
+        // t1.join();
     }
     catch (char const *e)
     {
@@ -320,7 +415,7 @@ int main(int argc, char **argv)
               thread t1_cache_inserter(bmt_cache_inserter);
               thread t2_cache_evacuator(bmt_cache_evacuator);
               t1_cache_inserter.detach();
-              t2_cache_inserter.detach();
+              t2_cache_evacuator.detach();
                
             }
         }
@@ -330,10 +425,7 @@ int main(int argc, char **argv)
           cout << ">>> Incorrect entry."<<endl;
           cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
         }
-      }
-      bmt_deinit(bmt_common_init);
-      return 0;
-
-
+    }
+    bmt_deinit(bmt_common_init);
     return 0;
 }

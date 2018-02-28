@@ -29,9 +29,6 @@ typedef struct bmt_init_status_t{
 } bmt_init_status_t;
 
 
-bool gExitFlag      = false;
-bool gScanDpdkPort  = true;
-
 mutex         cout_mutex;
 
 sai_switch_api_t *switch_api;

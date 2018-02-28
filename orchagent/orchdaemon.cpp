@@ -57,6 +57,15 @@ bool OrchDaemon::init()
         APP_LAG_MEMBER_TABLE_NAME
     };
 
+    vector<string> bmtor_tables = {
+        //TODO define these strings in: /sonic-swss-common/common/schema.h
+        "VNET_ROUTE_TUNNEL_TABLE",
+        "VNET_ROUTE_TABLE",
+        "VNET",         //TODO: ConfigDB
+        "VNET_INTF",    //TODO: ConfigDB
+        "VXLAN_TUNNEL"  //TODO: ConfigDB
+    };
+
     gPortsOrch = new PortsOrch(m_applDb, ports_tables);
     gFdbOrch = new FdbOrch(m_applDb, APP_FDB_TABLE_NAME, gPortsOrch);
     IntfsOrch *intfs_orch = new IntfsOrch(m_applDb, APP_INTF_TABLE_NAME);
@@ -64,7 +73,7 @@ bool OrchDaemon::init()
     RouteOrch *route_orch = new RouteOrch(m_applDb, APP_ROUTE_TABLE_NAME, neigh_orch);
     CoppOrch  *copp_orch  = new CoppOrch(m_applDb, APP_COPP_TABLE_NAME);
     TunnelDecapOrch *tunnel_decap_orch = new TunnelDecapOrch(m_applDb, APP_TUNNEL_DECAP_TABLE_NAME);
-    VnetRouteTunnelOrch *vnet_route_tunnel_orch = new VnetRouteTunnelOrch(m_applDb, "VNET_ROUTE_TUNNEL_TABLE");
+    BmToRCacheOrch *bmtor_cache_orch = new BmToRCacheOrch(m_applDb, bmtor_tables);
 
     vector<string> qos_tables = {
         CFG_TC_TO_QUEUE_MAP_TABLE_NAME,
@@ -99,7 +108,7 @@ bool OrchDaemon::init()
     };
     gAclOrch = new AclOrch(m_configDb, acl_tables, gPortsOrch, mirror_orch, neigh_orch, route_orch);
 
-    m_orchList = { switch_orch, gPortsOrch, intfs_orch, neigh_orch, route_orch, copp_orch, tunnel_decap_orch, vnet_route_tunnel_orch, qos_orch, buffer_orch, mirror_orch, gAclOrch, gFdbOrch};
+    m_orchList = { switch_orch, gPortsOrch, intfs_orch, neigh_orch, route_orch, copp_orch, tunnel_decap_orch, bmtor_cache_orch, qos_orch, buffer_orch, mirror_orch, gAclOrch, gFdbOrch};
     m_select = new Select();
 
     vector<string> pfc_wd_tables = {

@@ -144,7 +144,7 @@ void bmt_deinit(bmt_init_status_t bmt_common_init)
   sai_api_uninitialize();
 }
 
-int bmt_init(bmt_init_status_t *bmt_common_init)
+int bmt_init(bmt_init_status_t bmt_common_init)
 {
   sai_status_t status;
   // Create 1D Bridge
