@@ -27,17 +27,14 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
 {
     SWSS_LOG_ENTER();
     tunnel_created = false;
-    gVtepIp = htonl(0x0a000014); // 10.0.0.20
-    gVNI = 8;
-    gVID = 120;
-    // dpdk_port = 
+    gVtepIp = htonl(0x0a000014); // 10.0.0.20 // TODO remove
+    gVNI = 8;   // TODO remove
+    gVID = 120; // TODO remove
 }
 
 sai_status_t BmToRCacheOrch::create_tunnel() {
     // Create tunnels and tunnel maps
   sai_status_t status;
-  dpdk_port = sai_get_port_id_by_front_port(7);
-  port_10_oid = sai_get_port_id_by_front_port(10);
   sai_attribute_t tunnel_map_attr[2];
   sai_object_id_t tunnel_encap_map;
   sai_object_id_t tunnel_decap_map;
@@ -168,6 +165,8 @@ void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
 
 void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
     SWSS_LOG_ENTER();
+    dpdk_port = sai_get_port_id_by_alias("Ethernet24"); // TODO - argument?
+    port_10_oid = sai_get_port_id_by_alias("Ethernet36"); // TODO remove
     auto it = consumer.m_toSync.begin();
     while (it != consumer.m_toSync.end()) {
         KeyOpFieldsValuesTuple t = it->second;
@@ -193,21 +192,17 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
         uint16_t vnet_bitmap = 1 << 8; //TODO: build this from vnet peering list and vnet_intf
         if (op == SET_COMMAND) {
             sai_status_t status;
-            dpdk_port = sai_get_port_id_by_front_port(7); // TODO remove
-            port_10_oid = sai_get_port_id_by_front_port(10); // TODO remove
             SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. gSwitchId = 0x%lx", gSwitchId);
             SWSS_LOG_NOTICE("vnet %s. enpoint %s", vnet_name.c_str(), endpoint.c_str());
             SWSS_LOG_NOTICE("underlay dst_ip 0x%x. vnet_bitmap 0x%x. overlay dip 0x%x", underlay_dip, vnet_bitmap, overlay_dip_prefix.getIp().getIp().ip_addr.ipv4_addr);
-            SWSS_LOG_NOTICE("DPDK port 0x%lx", dpdk_port);
-            SWSS_LOG_NOTICE("DPDK port (by alias): 0x%lx", sai_get_port_id_by_alias("Ethernet24"));
-
-            if (!tunnel_created) {
+            SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet36: 0x%lx", dpdk_port, port_10_oid);
+            // if (!tunnel_created) {
                 //TODO: return this once we fix sairedis bug
                 // if (status != create_tunnel()) {
                 //     SWSS_LOG_ERROR("Error creating VxLAN tunnel");
                 //     throw "VxLAN tunnel creation failure";
                 // }
-            }
+            // }
 
             sai_object_id_t peering_entry;
             sai_attribute_t table_peer_attr[3];
@@ -224,73 +219,31 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
                 throw "BMToR initialization failure";
             }
 
-            sai_attribute_t vhost_table_entry_attr[8];
-            vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
-            vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
-            vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
-            vhost_table_entry_attr[1].value.oid = dpdk_port;
-            vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
-            vhost_table_entry_attr[2].value.booldata = true;
-            // Patch. TODO: need to add condition in header
-            vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
-            vhost_table_entry_attr[3].value.u32 = 0;
-            vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
-            vhost_table_entry_attr[4].value.u32 = 0;
-            vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
-            vhost_table_entry_attr[5].value.u32 = 0;
-            vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
-            vhost_table_entry_attr[6].value.u32 = 0;
+            // sai_attribute_t vhost_table_entry_attr[8];
+            // vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
+            // vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
+            // vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
+            // vhost_table_entry_attr[1].value.oid = dpdk_port;
+            // vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
+            // vhost_table_entry_attr[2].value.booldata = true;
+            // // Patch. TODO: need to add condition in header
+            // vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
+            // vhost_table_entry_attr[3].value.u32 = 0;
+            // vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
+            // vhost_table_entry_attr[4].value.u32 = 0;
+            // vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
+            // vhost_table_entry_attr[5].value.u32 = 0;
+            // vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
+            // vhost_table_entry_attr[6].value.u32 = 0;
 
-            status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
-            if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to create table_vhost default entry");
-                throw "BMToR initialization failure";
-            }
+            // status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
+            // if (status != SAI_STATUS_SUCCESS) {
+            //     SWSS_LOG_ERROR("Failed to create table_vhost default entry");
+            //     throw "BMToR initialization failure";
+            // }
+            it = consumer.m_toSync.erase(it);
         }
     }
-}
-
-
-sai_object_id_t
-    BmToRCacheOrch::sai_get_port_id_by_front_port(uint32_t hw_port)
-{
-  sai_object_id_t new_objlist[32]; //TODO change back to getting from switch
-  sai_attribute_t sai_attr;
-  sai_attr.id = SAI_SWITCH_ATTR_PORT_NUMBER;
-  // sai_switch_api->get_swi tch_attribute(switch_id, 1, &sai_attr);
-  uint32_t max_ports = 32; //sai_attr.value.u32;
-
-  sai_attr.id = SAI_SWITCH_ATTR_PORT_LIST;
-  //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
-  sai_attr.value.objlist.count = max_ports;
-  sai_attr.value.objlist.list = &new_objlist[0];
-  sai_switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
-  // SWSS_LOG_NOTICE("port list\n");
-
-  sai_attribute_t hw_lane_list_attr;
-
-  for (uint32_t i = 0; i < max_ports; i++)
-  {
-    uint32_t hw_port_list[4];
-    hw_lane_list_attr.id = SAI_PORT_ATTR_HW_LANE_LIST;
-    hw_lane_list_attr.value.u32list.list = &hw_port_list[0];
-    hw_lane_list_attr.value.u32list.count = 4;
-    // SWSS_LOG_NOTICE("port sai_object_id 0x%lx \n", sai_attr.value.objlist.list[i]);
-    sai_port_api->get_port_attribute(sai_attr.value.objlist.list[i], 1,
-                                 &hw_lane_list_attr);
-    // SWSS_LOG_NOTICE("hw lanes: %d %d %d %d\n", hw_port_list[0], hw_port_list[1], hw_port_list[2], hw_port_list[3]);
-    if (hw_port_list[0] == ((hw_port - 1) * 4)) // Front panel 1 is 0, 2 is 4, 3 is 8, etc.. (room is left for splits)
-    {
-      // free(hw_lane_list_attr.value.u32list.list);
-      // free(sai_attr.value.objlist.list);
-      return sai_attr.value.objlist.list[i];
-    }
-    // free(hw_lane_list_attr.value.u32list.list);
-  }
-  // free(sai_attr.value.objlist.list);
-  SWSS_LOG_ERROR("Failed to get port %d sai_object_id", hw_port);
-  throw "BMToR initialization failure";
-  return -1;
 }
 
 sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
