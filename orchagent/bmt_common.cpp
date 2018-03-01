@@ -19,7 +19,43 @@ extern "C" {
 #include "bmt_common.h"
 #include <csignal>
 
+// TODO move from main to here
 extern sai_object_id_t gSwitchId;
+
+
+sai_switch_api_t *switch_api;
+sai_object_id_t g_switch_id;
+sai_port_api_t *port_api;
+sai_tunnel_api_t *tunnel_api;
+sai_vlan_api_t *vlan_api;
+sai_bridge_api_t *bridge_api;
+sai_bmtor_api_t *bmtor_api;
+sai_object_id_t tunnel_encap_map;
+sai_object_id_t tunnel_decap_map;
+sai_object_id_t tunnel_decap_map_entry;
+sai_object_id_t tunnel_encap_map_entry;
+sai_object_id_t tunnel_id;
+sai_object_id_t tunnel_term_table_entry;
+sai_object_id_t bridge_id;
+sai_object_id_t vlan_oid;
+sai_object_id_t vlan_member_oid;
+sai_object_id_t dpdk_vlan_member_oid;
+sai_object_id_t bridge_port_id;
+sai_object_id_t dpdk_bridge_port_id;
+sai_object_id_t vhost_table_entry;
+sai_object_id_t default_vhost_table_entry;
+sai_object_id_t peering_entry;
+sai_object_id_t ports_to_bind[32];
+sai_object_list_t ports_to_bind_list;
+  
+uint32_t vni = 8;
+uint16_t vid = 120;
+sai_object_id_t vr_id;
+sai_object_id_t rif_id = 0x6; // loopback
+sai_object_id_t port_10_oid;
+sai_object_id_t dpdk_port; 
+sai_object_id_t default_1q;
+
 
 /**
 *
@@ -143,7 +179,8 @@ void bmt_deinit(bmt_init_status_t* bmt_common_init)
     printf("remove_bridge. status %d\n", bridge_api->remove_bridge(bridge_id));
   }
   if (bmt_common_init->sai_ext_api_inited) {
-    printf("sai_extension_api_uninitialize. status %d\n", sai_ext_api_uninitialize(ports_to_bind_list));
+    // TODO: no sai ext API 
+    // printf("sai_extension_api_uninitialize. status %d\n", sai_ext_api_uninitialize(ports_to_bind_list));
   }
   sai_api_uninitialize();
 }

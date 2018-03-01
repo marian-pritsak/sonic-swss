@@ -1,6 +1,6 @@
 
 
-#if !defined (__BMT_CACHE_EVACUATOR_H_)
+#ifndef __BMT_CACHE_EVACUATOR_H_
 #define __BMT_CACHE_EVACUATOR_H_
 
 

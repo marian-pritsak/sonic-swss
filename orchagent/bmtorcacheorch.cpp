@@ -5,12 +5,14 @@
 #include <net/if.h>
 
 #include "bmtorcacheorch.h"
+#include "portsorch.h"
 #include "ipprefix.h"
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
 
 extern sai_object_id_t gVirtualRouterId;
+extern sai_object_id_t gUnderlayIfId;
 
 // extern sai_router_interface_api_t*  sai_router_intfs_api;
 // extern sai_route_api_t*             sai_route_api;
@@ -22,7 +24,7 @@ extern sai_tunnel_api_t*               sai_tunnel_api;
 extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
 
-BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
+BmToRCacheOrch::BmToRCacheOrch(swss::DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
 {
     SWSS_LOG_ENTER();

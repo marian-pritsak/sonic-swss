@@ -16,6 +16,9 @@ using namespace swss;
 extern sai_switch_api_t*           sai_switch_api;
 extern sai_object_id_t             gSwitchId;
 
+/* forward declaration */
+class BmToRCacheOrch;
+
 /* Global variable gPortsOrch declared */
 PortsOrch *gPortsOrch;
 /* Global variable gFdbOrch declared */

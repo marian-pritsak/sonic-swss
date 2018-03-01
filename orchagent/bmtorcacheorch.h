@@ -2,17 +2,6 @@
 #define SWSS_BMTOR_CACHE_ORCH_H
 
 #include "orch.h"
-#include "portsorch.h"
-
-#include "ipaddresses.h"
-#include "ipprefix.h"
-#include "macaddress.h"
-
-#include <map>
-#include <set>
-
-extern sai_object_id_t gVirtualRouterId;
-extern sai_object_id_t gUnderlayIfId;
 
 class BmToRCacheOrch : public Orch
 {

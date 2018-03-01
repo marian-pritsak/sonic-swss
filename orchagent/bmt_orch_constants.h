@@ -1,5 +1,5 @@
 
-#if !defined (__BMT_ORCH_CONSTANTS_H_)
+#ifndef __BMT_ORCH_CONSTANTS_H_
 #define __BMT_ORCH_CONSTANTS_H_
 
 

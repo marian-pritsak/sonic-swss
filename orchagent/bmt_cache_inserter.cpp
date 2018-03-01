@@ -17,11 +17,12 @@ extern "C" {
 #include <mutex>
 #include <thread>
 #include "bmt_orch_constants.h"
+#include "bmt_common.h"
 #include "bmt_cache_inserter.h"
 
 using namespace std;
 extern sai_hostif_api_t sai_hostif_api;
-extern sai_samplepacket_api_t sai_samplepacket_api;
+sai_samplepacket_api_t sai_samplepacket_api;
 extern sai_port_api_t sai_port_api;
 extern sai_switch_api_t sai_switch_api;
 extern sai_bmtor_api_t sai_bmtor_api;
@@ -61,8 +62,8 @@ typedef struct bmt_vhost_table_t {
 // } rules_db_t;
 
 /* Global variables */
-sai_object_id_t gSwitchId;
-sai_object_id_t dpdk_port;
+extern sai_object_id_t gSwitchId;
+extern sai_object_id_t dpdk_port;
 sai_object_id_t samplepacketOid;
 sai_object_id_t samplepackettrapOid;
 sai_object_id_t trapGroupOid;
@@ -466,7 +467,7 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
 
 
 /* helper functions */
-
+/*
 sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port) {
     cout << "[inserter] sai_get_port_id_by_front_port" << endl;
     sai_object_id_t new_objlist[32]; //TODO change back to getting from switch
@@ -505,9 +506,10 @@ sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port) {
     return -1;
 }
 
+*/
 
 /* main */
-int bmt_cache_inserter()
+int bmt_cache_inserter(void)
 {
     /* get dpdk port */
     dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT);
@@ -528,7 +530,7 @@ int bmt_cache_inserter()
 }
 
 
-int bmt_cache_evacuator(){
+int bmt_cache_evacuator(void){
 	while (gScanDpdkPort){
 		if ((vhost_table.used_entries > (VHOST_TABLE_SIZE-2)) && vhost_table.free_offsets.size()<CACHE_EVAC_SIZE){
 			// TODO loop over all entries, read counters and catch the mice flows
@@ -542,4 +544,11 @@ int bmt_cache_evacuator(){
 		
 	}
 	return 0;
+}
+
+void bmt_cache_start() {
+              thread t1_cache_inserter(bmt_cache_inserter);
+              thread t2_cache_evacuator(bmt_cache_evacuator);
+              t1_cache_inserter.detach();
+              t2_cache_evacuator.detach();
 }

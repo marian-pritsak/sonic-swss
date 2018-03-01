@@ -24,8 +24,6 @@ extern "C" {
 #include <signal.h>
 
 #include "bmt_common.h"
-#include "bmt_cache_inserter.h"
-#include "bmt_cache_evacuator.h"
 
 using namespace std;
 using namespace swss;
@@ -56,6 +54,7 @@ string gRecordFile;
 
 bool gExitFlag     = false;
 bool gScanDpdkPort = true;
+
 
 /* Global database mutex */
 mutex gDbMutex;
@@ -413,10 +412,13 @@ int main(int argc, char **argv)
             gScanDpdkPort = !gScanDpdkPort;
             cout << ">>> toggeling cache state to " << gScanDpdkPort << endl;
             if (gScanDpdkPort){
+/*
               thread t1_cache_inserter(bmt_cache_inserter);
               thread t2_cache_evacuator(bmt_cache_evacuator);
               t1_cache_inserter.detach();
               t2_cache_evacuator.detach();
+*/
+bmt_cache_start();
                
             }
         }
