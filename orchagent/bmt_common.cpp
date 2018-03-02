@@ -18,18 +18,18 @@ extern "C" {
 #endif
 #include "bmt_common.h"
 #include <csignal>
+#include "logger.h"
 
 // TODO move from main to here
 extern sai_object_id_t gSwitchId;
 
 
-sai_switch_api_t *switch_api;
-sai_object_id_t g_switch_id;
-sai_port_api_t *port_api;
-sai_tunnel_api_t *tunnel_api;
-sai_vlan_api_t *vlan_api;
-sai_bridge_api_t *bridge_api;
-sai_bmtor_api_t *bmtor_api;
+extern sai_switch_api_t *sai_switch_api;
+extern sai_port_api_t *sai_port_api;
+extern sai_tunnel_api_t *sai_tunnel_api;
+extern sai_vlan_api_t *sai_vlan_api;
+extern sai_bridge_api_t *sai_bridge_api;
+extern sai_bmtor_api_t *sai_bmtor_api;
 sai_object_id_t tunnel_encap_map;
 sai_object_id_t tunnel_decap_map;
 sai_object_id_t tunnel_decap_map_entry;
@@ -62,20 +62,23 @@ sai_object_id_t default_1q;
 */
 sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port)
 {
+  SWSS_LOG_ERROR("%s enter", __FUNCTION__);
   sai_object_id_t new_objlist[32]; //TODO change back to getting from switch
   sai_attribute_t sai_attr;
   sai_attr.id = SAI_SWITCH_ATTR_PORT_NUMBER;
-  // switch_api->get_switch_attribute(switch_id, 1, &sai_attr);
+  // sai_switch_api->get_switch_attribute(switch_id, 1, &sai_attr);
   uint32_t max_ports = 32; //sai_attr.value.u32;
 
   sai_attr.id = SAI_SWITCH_ATTR_PORT_LIST;
   //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
   sai_attr.value.objlist.count = max_ports;
   sai_attr.value.objlist.list = &new_objlist[0];
-  switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
+  SWSS_LOG_ERROR("%s sw attr", __FUNCTION__);
+  sai_switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
   // printf("port list\n");
 
   sai_attribute_t hw_lane_list_attr;
+  SWSS_LOG_ERROR("%s before loop", __FUNCTION__);
 
   for (unsigned int i = 0; i < max_ports; i++)
   {
@@ -84,7 +87,7 @@ sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port)
     hw_lane_list_attr.value.u32list.list = &hw_port_list[0];
     hw_lane_list_attr.value.u32list.count = 4;
     // printf("port sai_object_id 0x%" PRIx64 " \n", sai_attr.value.objlist.list[i]);
-    port_api->get_port_attribute(sai_attr.value.objlist.list[i], 1,
+    sai_port_api->get_port_attribute(sai_attr.value.objlist.list[i], 1,
                                  &hw_lane_list_attr);
     // printf("hw lanes: %d %d %d %d\n", hw_port_list[0], hw_port_list[1], hw_port_list[2], hw_port_list[3]);
     if (hw_port_list[0] == ((hw_port - 1) * 4))
@@ -106,77 +109,77 @@ void bmt_deinit(bmt_init_status_t* bmt_common_init)
 {
   if (bmt_common_init->peering_entry_created)
   {
-    printf("remove_table_peering_entry. status %d\n", bmtor_api->remove_table_peering_entry(peering_entry));
+    printf("remove_table_peering_entry. status %d\n", sai_bmtor_api->remove_table_peering_entry(peering_entry));
   }
   if (bmt_common_init->vhost_table_entry_created)
   {
-    printf("remove_table_vhost_entry. status %d\n", bmtor_api->remove_table_vhost_entry(vhost_table_entry));
+    printf("remove_table_vhost_entry. status %d\n", sai_bmtor_api->remove_table_vhost_entry(vhost_table_entry));
   }
   if (bmt_common_init->default_vhost_table_entry_created)
   {
-    printf("remove_table_vhost_entry. status %d\n", bmtor_api->remove_table_vhost_entry(default_vhost_table_entry));
+    printf("remove_table_vhost_entry. status %d\n", sai_bmtor_api->remove_table_vhost_entry(default_vhost_table_entry));
   }
   if (bmt_common_init->tunnel_term_table_entry_created)
   {
-    printf("remove_tunnel_term_table_entry. status %d\n", tunnel_api->remove_tunnel_term_table_entry(tunnel_term_table_entry));
+    printf("remove_tunnel_term_table_entry. status %d\n", sai_tunnel_api->remove_tunnel_term_table_entry(tunnel_term_table_entry));
   }
   if (bmt_common_init->tunnel_created)
   {
-    printf("remove_tunnel. status %d\n", tunnel_api->remove_tunnel(tunnel_id));
+    printf("remove_tunnel. status %d\n", sai_tunnel_api->remove_tunnel(tunnel_id));
   }
   if (bmt_common_init->tunnel_decap_map_entry_created)
   {
-    printf("remove_tunnel_map_entry (decap). status %d\n", tunnel_api->remove_tunnel_map_entry(tunnel_decap_map_entry));
+    printf("remove_tunnel_map_entry (decap). status %d\n", sai_tunnel_api->remove_tunnel_map_entry(tunnel_decap_map_entry));
   }
   if (bmt_common_init->tunnel_encap_map_entry_created)
   {
-    printf("remove_tunnel_map_entry (encap). status %d\n", tunnel_api->remove_tunnel_map_entry(tunnel_encap_map_entry));
+    printf("remove_tunnel_map_entry (encap). status %d\n", sai_tunnel_api->remove_tunnel_map_entry(tunnel_encap_map_entry));
   }
   if (bmt_common_init->tunnel_encap_map_created)
   {
-    printf("remove_tunnel_map (encap). status %d\n", tunnel_api->remove_tunnel_map(tunnel_encap_map));
+    printf("remove_tunnel_map (encap). status %d\n", sai_tunnel_api->remove_tunnel_map(tunnel_encap_map));
   }
   if (bmt_common_init->tunnel_decap_map_created)
   {
-    printf("remove_tunnel_map (decap). status %d\n", tunnel_api->remove_tunnel_map(tunnel_decap_map));
+    printf("remove_tunnel_map (decap). status %d\n", sai_tunnel_api->remove_tunnel_map(tunnel_decap_map));
   }
   if (bmt_common_init->vlan_member_created)
   {
-    printf("remove_vlan_member. status %d\n", vlan_api->remove_vlan_member(vlan_member_oid));
+    printf("remove_vlan_member. status %d\n", sai_vlan_api->remove_vlan_member(vlan_member_oid));
   }
   if (bmt_common_init->dpdk_vlan_member_created)
   {
-    printf("remove_vlan_member. status %d\n", vlan_api->remove_vlan_member(dpdk_vlan_member_oid));
+    printf("remove_vlan_member. status %d\n", sai_vlan_api->remove_vlan_member(dpdk_vlan_member_oid));
   }
   if (bmt_common_init->vlan_created)
   {
-    printf("remove_vlan. status %d\n", vlan_api->remove_vlan(vlan_oid));
+    printf("remove_vlan. status %d\n", sai_vlan_api->remove_vlan(vlan_oid));
   }
   if (bmt_common_init->bridge_port_created)
   {
     sai_attribute_t bridge_port_attr;
     bridge_port_attr.id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE;
     bridge_port_attr.value.booldata = false;
-    printf("set_bridge_port down. status %d\n", bridge_api->set_bridge_port_attribute(bridge_port_id, &bridge_port_attr));
+    printf("set_bridge_port down. status %d\n", sai_bridge_api->set_bridge_port_attribute(bridge_port_id, &bridge_port_attr));
     //TODO: flush fdb entries, maybe?
-    printf("remove_bridge_port. status %d\n", bridge_api->remove_bridge_port(bridge_port_id));
+    printf("remove_bridge_port. status %d\n", sai_bridge_api->remove_bridge_port(bridge_port_id));
     sai_attribute_t pvid_attr;
     pvid_attr.id = SAI_PORT_ATTR_PORT_VLAN_ID;
     pvid_attr.value.u16 = 1;
-    printf("set pvid 1. status %d\n", port_api->set_port_attribute(port_10_oid, &pvid_attr));
+    printf("set pvid 1. status %d\n", sai_port_api->set_port_attribute(port_10_oid, &pvid_attr));
   }
   if (bmt_common_init->dpdk_bridge_port_created)
   {
     sai_attribute_t bridge_port_attr;
     bridge_port_attr.id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE;
     bridge_port_attr.value.booldata = false;
-    printf("set_bridge_port down. status %d\n", bridge_api->set_bridge_port_attribute(dpdk_bridge_port_id, &bridge_port_attr));
+    printf("set_bridge_port down. status %d\n", sai_bridge_api->set_bridge_port_attribute(dpdk_bridge_port_id, &bridge_port_attr));
     //TODO: flush fdb entries, maybe?
-    printf("remove_bridge_port. status %d\n", bridge_api->remove_bridge_port(dpdk_bridge_port_id));
+    printf("remove_bridge_port. status %d\n", sai_bridge_api->remove_bridge_port(dpdk_bridge_port_id));
   }
   if (bmt_common_init->bridge_created)
   {
-    printf("remove_bridge. status %d\n", bridge_api->remove_bridge(bridge_id));
+    printf("remove_bridge. status %d\n", sai_bridge_api->remove_bridge(bridge_id));
   }
   if (bmt_common_init->sai_ext_api_inited) {
     // TODO: no sai ext API 
@@ -192,7 +195,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   // sai_attribute_t bridge_attr[1];
   // bridge_attr[0].id = SAI_BRIDGE_ATTR_TYPE;
   // bridge_attr[0].value.s32 = SAI_BRIDGE_TYPE_1D;
-  // status = bridge_api->create_bridge(&bridge_id, gSwitchId, 1, bridge_attr);
+  // status = sai_bridge_api->create_bridge(&bridge_id, gSwitchId, 1, bridge_attr);
   // printf("create_bridge. status = %d\n", status);
   // if (status != SAI_STATUS_SUCCESS)
   // {
@@ -213,7 +216,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   bridge_port_attr[3].value.booldata = true;
   bridge_port_attr[4].id = SAI_BRIDGE_PORT_ATTR_VLAN_ID;
   bridge_port_attr[4].value.u16 = vid;
-  status = bridge_api->create_bridge_port(&bridge_port_id, gSwitchId, 5, bridge_port_attr);
+  status = sai_bridge_api->create_bridge_port(&bridge_port_id, gSwitchId, 5, bridge_port_attr);
   printf("create_bridge_port. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -233,7 +236,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   bridge_port_attr[3].value.booldata = true;
   bridge_port_attr[4].id = SAI_BRIDGE_PORT_ATTR_VLAN_ID;
   bridge_port_attr[4].value.u16 = vid;
-  status = bridge_api->create_bridge_port(&dpdk_bridge_port_id, gSwitchId, 5, bridge_port_attr);
+  status = sai_bridge_api->create_bridge_port(&dpdk_bridge_port_id, gSwitchId, 5, bridge_port_attr);
   printf("create_bridge_port. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -247,7 +250,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   sai_attribute_t vlan_attr[1];
   vlan_attr[0].id = SAI_VLAN_ATTR_VLAN_ID;
   vlan_attr[0].value.u16 = vid;
-  status = vlan_api->create_vlan(&vlan_oid, gSwitchId, 1, vlan_attr);
+  status = sai_vlan_api->create_vlan(&vlan_oid, gSwitchId, 1, vlan_attr);
   printf("create_vlan. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     bmt_deinit(bmt_common_init);
@@ -261,7 +264,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   vlan_member_attr[1].value.s32 = SAI_VLAN_TAGGING_MODE_UNTAGGED;
   vlan_member_attr[2].id = SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID;
   vlan_member_attr[2].value.oid = bridge_port_id;
-  status = vlan_api->create_vlan_member(&vlan_member_oid, gSwitchId, 3, vlan_member_attr);
+  status = sai_vlan_api->create_vlan_member(&vlan_member_oid, gSwitchId, 3, vlan_member_attr);
   printf("create_vlan_member. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     bmt_deinit(bmt_common_init);
@@ -274,7 +277,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   vlan_member_attr[1].value.s32 = SAI_VLAN_TAGGING_MODE_TAGGED;
   vlan_member_attr[2].id = SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID;
   vlan_member_attr[2].value.oid = dpdk_bridge_port_id;
-  status = vlan_api->create_vlan_member(&dpdk_vlan_member_oid, gSwitchId, 3, vlan_member_attr);
+  status = sai_vlan_api->create_vlan_member(&dpdk_vlan_member_oid, gSwitchId, 3, vlan_member_attr);
   printf("create_vlan_member. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     bmt_deinit(bmt_common_init);
@@ -284,7 +287,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   sai_attribute_t pvid_attr;
   pvid_attr.id = SAI_PORT_ATTR_PORT_VLAN_ID;
   pvid_attr.value.u16 = vid;
-  status = port_api->set_port_attribute(port_10_oid, &pvid_attr);
+  status = sai_port_api->set_port_attribute(port_10_oid, &pvid_attr);
   printf("set pvid. status = %d\n", status);
   
 
@@ -295,7 +298,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VLAN_ID_TO_VNI;
   tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
   tunnel_map_attr[1].value.tunnelmap.count = 0;
-  status = tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
   printf("create_tunnel_map (encap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -309,7 +312,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_VLAN_ID;
   tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
   tunnel_map_attr[1].value.tunnelmap.count = 0;
-  status = tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
   printf("create_tunnel_map (decap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -328,7 +331,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_map_entry_attr[2].value.u32 = vni;
   tunnel_map_entry_attr[3].id = SAI_TUNNEL_MAP_ENTRY_ATTR_VLAN_ID_KEY;
   tunnel_map_entry_attr[3].value.u16 = vid;
-  status = tunnel_api->create_tunnel_map_entry(&tunnel_encap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
+  status = sai_tunnel_api->create_tunnel_map_entry(&tunnel_encap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
   printf("create_tunnel_map_entry (encap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -346,7 +349,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_map_entry_attr[2].value.u32 = vni;
   tunnel_map_entry_attr[3].id = SAI_TUNNEL_MAP_ENTRY_ATTR_VLAN_ID_VALUE;
   tunnel_map_entry_attr[3].value.u16 = vid;
-  // status = tunnel_api->create_tunnel_map_entry(&tunnel_decap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
+  // status = sai_tunnel_api->create_tunnel_map_entry(&tunnel_decap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
   // printf("create_tunnel_map_entry (decap). status = %d\n", status);
   // if (status != SAI_STATUS_SUCCESS)
   // {
@@ -377,7 +380,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_attr[6].id = SAI_TUNNEL_ATTR_ENCAP_SRC_IP;
   tunnel_attr[6].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
   tunnel_attr[6].value.ipaddr.addr.ip4 = switch_vtep_ip;
-  status = tunnel_api->create_tunnel(&tunnel_id, gSwitchId, 8, tunnel_attr);
+  status = sai_tunnel_api->create_tunnel(&tunnel_id, gSwitchId, 8, tunnel_attr);
   printf("create_tunnel. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -401,7 +404,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_term_table_entry_attr[3].value.oid = tunnel_id;
   tunnel_term_table_entry_attr[4].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_TUNNEL_TYPE;
   tunnel_term_table_entry_attr[4].value.s32 = SAI_TUNNEL_TYPE_VXLAN;
-  status = tunnel_api->create_tunnel_term_table_entry(&tunnel_term_table_entry, gSwitchId, 5, tunnel_term_table_entry_attr);
+  status = sai_tunnel_api->create_tunnel_term_table_entry(&tunnel_term_table_entry, gSwitchId, 5, tunnel_term_table_entry_attr);
   printf("create_tunnel_term_entry. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -419,7 +422,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   table_peer_attr[1].value.oid = port_10_oid;
   table_peer_attr[2].id = SAI_TABLE_PEERING_ENTRY_ATTR_META_REG;
   table_peer_attr[2].value.u16 = vnet_bitmap;
-  status = bmtor_api->create_table_peering_entry(&peering_entry, gSwitchId, 4, table_peer_attr);
+  status = sai_bmtor_api->create_table_peering_entry(&peering_entry, gSwitchId, 4, table_peer_attr);
   printf("create_table_peering_entry. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {
@@ -437,7 +440,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   vhost_table_entry_attr[1].value.oid = dpdk_port;
   vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
   vhost_table_entry_attr[2].value.booldata = true;
-  status = bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 3, vhost_table_entry_attr);
+  status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 3, vhost_table_entry_attr);
   printf("create_table_vhost_entry. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
   {

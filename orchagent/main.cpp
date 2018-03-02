@@ -369,6 +369,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    bmt_cache_start();
+
     try
     {
         SWSS_LOG_NOTICE("Notify syncd APPLY_VIEW");
@@ -404,7 +406,7 @@ int main(int argc, char **argv)
     // }
     gExitFlag      = false;
     gScanDpdkPort  = true;
-    char cache_toggle;
+    // char cache_toggle;
     // while (!gExitFlag){
         cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
         // cin >> cache_toggle;
@@ -418,7 +420,6 @@ int main(int argc, char **argv)
               t1_cache_inserter.detach();
               t2_cache_evacuator.detach();
 */
-            bmt_cache_start();
                
     //         }
     //     }
