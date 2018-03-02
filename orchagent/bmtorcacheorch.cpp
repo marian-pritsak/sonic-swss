@@ -5,14 +5,12 @@
 #include <net/if.h>
 
 #include "bmtorcacheorch.h"
-#include "portsorch.h"
 #include "ipprefix.h"
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
 
 extern sai_object_id_t gVirtualRouterId;
-extern sai_object_id_t gUnderlayIfId;
 
 // extern sai_router_interface_api_t*  sai_router_intfs_api;
 // extern sai_route_api_t*             sai_route_api;
@@ -24,7 +22,7 @@ extern sai_tunnel_api_t*               sai_tunnel_api;
 extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
 
-BmToRCacheOrch::BmToRCacheOrch(swss::DBConnector *db, vector<string> tableNames) :
+BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
 {
     SWSS_LOG_ENTER();
@@ -32,6 +30,9 @@ BmToRCacheOrch::BmToRCacheOrch(swss::DBConnector *db, vector<string> tableNames)
     gVtepIp = htonl(0x0a000014); // 10.0.0.20 // TODO remove
     gVNI = 8;   // TODO remove
     gVID = 120; // TODO remove
+    gDPDKVlan = 3904;
+    gTunnelId = SAI_NULL_OBJECT_ID;
+    gVnetBitmap = 0xfff;
 }
 
 sai_status_t BmToRCacheOrch::create_tunnel() {
@@ -124,6 +125,14 @@ sai_status_t BmToRCacheOrch::create_tunnel() {
     return status;
   tunnel_created = true;
   return SAI_STATUS_SUCCESS;
+
+  sai_attribute_t pvid_attr;
+  pvid_attr.id = SAI_PORT_ATTR_PORT_VLAN_ID;
+  pvid_attr.value.u16 = gVID;
+  SWSS_LOG_NOTICE("Set port pvid %d\n", pvid_attr.value.u16);
+  status = sai_port_api->set_port_attribute(port_10_oid, &pvid_attr);
+  if (status != SAI_STATUS_SUCCESS)
+    return status;
 }
 
 void BmToRCacheOrch::doTask(Consumer &consumer)
@@ -159,16 +168,49 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
 
 void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
   SWSS_LOG_ENTER();
+  auto it = consumer.m_toSync.begin();
+  while (it != consumer.m_toSync.end()) {
+    string op = kfvOp(it->second);
+    string key = kfvKey(it->second);
+    string vnet_name;
+    vector<string> keys = tokenize(kfvKey(it->second), ':');
+    string if_name = keys[0];
+    string bm_ip_prefix_str = keys[1];
+    for (auto i : kfvFieldsValues(it->second)) {
+            if (fvField(i) == "vnet_name")
+                vnet_name = fvValue(i);
+        }
+    
+    SWSS_LOG_NOTICE("Vnet name %s, ifname %s, ipprefix %s", vnet_name.c_str(), if_name.c_str(), bm_ip_prefix_str.c_str());
+    // create_tunnel();
+    it = consumer.m_toSync.erase(it);
+  }
+
 }
 
 void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
   SWSS_LOG_ENTER();
+  dpdk_port = sai_get_port_id_by_alias("Ethernet24"); // TODO - argument?
+  port_10_oid = sai_get_port_id_by_alias("Ethernet36"); // TODO remove
+  SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet36: 0x%lx", dpdk_port, port_10_oid);
+  auto it = consumer.m_toSync.begin();
+  while (it != consumer.m_toSync.end()) {
+    string op = kfvOp(it->second);
+    string key = kfvKey(it->second);
+    string src_ip_str;
+    for (auto i : kfvFieldsValues(it->second)) {
+            if (fvField(i) == "src_ip")
+                src_ip_str = fvValue(i);
+        }
+    IpAddress src_ip(src_ip_str);
+    SWSS_LOG_NOTICE("src_ip_str %s, ip 0x%x", src_ip_str.c_str(), ntohl(src_ip.getIp().ip_addr.ipv4_addr));
+    create_tunnel();
+    it = consumer.m_toSync.erase(it);
+  }
 }
 
 void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
     SWSS_LOG_ENTER();
-    dpdk_port = sai_get_port_id_by_alias("Ethernet24"); // TODO - argument?
-    port_10_oid = sai_get_port_id_by_alias("Ethernet36"); // TODO remove
     auto it = consumer.m_toSync.begin();
     while (it != consumer.m_toSync.end()) {
         KeyOpFieldsValuesTuple t = it->second;
@@ -184,6 +226,7 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
                 endpoint = fvValue(i);
         }
         string op = kfvOp(t);
+        string key = kfvKey(t);
         uint32_t underlay_dip = 0;
         vector<string> dip_bytes = tokenize(endpoint, '.');
         for (vector<string>::iterator it_bytes = dip_bytes.begin(); it_bytes != dip_bytes.end(); ++it_bytes) {
@@ -191,22 +234,20 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
             underlay_dip += stoi(*it_bytes);
             SWSS_LOG_NOTICE("underlay_dip_wip = 0x%x. current byte = %s (0x%x)", underlay_dip, it_bytes->c_str(), stoi(*it_bytes));
         }
-        uint16_t vnet_bitmap = 1 << 8; //TODO: build this from vnet peering list and vnet_intf
+        // SWSS_LOG_NOTICE("Initializing sai_ext_api (workaround)");
+        // sai_attribute_t sai_ext_attr;
+        // sai_ext_attr.id = SAI_TABLE_PEERING_ENTFRY_ATTR_SRC_PORT;
+        // sai_ext_attr.value.oid = port_10_oid;
+        // sai_bmtor_api->set_table_peering_entry_attribute(1, &sai_ext_attr);
+
+        uint16_t vnet_bitmap = GetVnetBitmap(8); //TODO: build this from vnet peering list and vnet_intf
+        sai_status_t status;
+        sai_object_id_t peering_entry;
         if (op == SET_COMMAND) {
-            sai_status_t status;
             SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. gSwitchId = 0x%lx", gSwitchId);
             SWSS_LOG_NOTICE("vnet %s. enpoint %s", vnet_name.c_str(), endpoint.c_str());
-            SWSS_LOG_NOTICE("underlay dst_ip 0x%x. vnet_bitmap 0x%x. overlay dip 0x%x", underlay_dip, vnet_bitmap, overlay_dip_prefix.getIp().getIp().ip_addr.ipv4_addr);
-            SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet36: 0x%lx", dpdk_port, port_10_oid);
-            // if (!tunnel_created) {
-                //TODO: return this once we fix sairedis bug
-                // if (status != create_tunnel()) {
-                //     SWSS_LOG_ERROR("Error creating VxLAN tunnel");
-                //     throw "VxLAN tunnel creation failure";
-                // }
-            // }
-
-            sai_object_id_t peering_entry;
+            SWSS_LOG_NOTICE("underlay dst_ip 0x%x. vnet_bitmap 0x%x. overlay dip 0x%x", underlay_dip, vnet_bitmap, ntohl(overlay_dip_prefix.getIp().getIp().ip_addr.ipv4_addr));
+    
             sai_attribute_t table_peer_attr[3];
             table_peer_attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
             table_peer_attr[0].value.s32 = SAI_TABLE_PEERING_ENTRY_ACTION_SET_VNET_BITMAP;
@@ -215,36 +256,64 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
             table_peer_attr[2].id = SAI_TABLE_PEERING_ENTRY_ATTR_META_REG;
             table_peer_attr[2].value.u16 = vnet_bitmap;
             status = sai_bmtor_api->create_table_peering_entry(&peering_entry, gSwitchId, 3, table_peer_attr);
-            printf("create_table_peering_entry. status = %d\n", status);
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to create table_peering entry");
                 throw "BMToR initialization failure";
             }
+            setVhostEntry(key, peering_entry);
 
-            // sai_attribute_t vhost_table_entry_attr[8];
-            // vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
-            // vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
-            // vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
-            // vhost_table_entry_attr[1].value.oid = dpdk_port;
-            // vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
-            // vhost_table_entry_attr[2].value.booldata = true;
-            // // Patch. TODO: need to add condition in header
-            // vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
-            // vhost_table_entry_attr[3].value.u32 = 0;
-            // vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
-            // vhost_table_entry_attr[4].value.u32 = 0;
-            // vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
-            // vhost_table_entry_attr[5].value.u32 = 0;
-            // vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
-            // vhost_table_entry_attr[6].value.u32 = 0;
+            sai_attribute_t vhost_table_entry_attr[8];
+            vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
+            vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
+            vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
+            vhost_table_entry_attr[1].value.oid = dpdk_port;
+            vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
+            vhost_table_entry_attr[2].value.booldata = true;
+            // Patch. TODO: need to add condition in header
+            vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
+            vhost_table_entry_attr[3].value.u32 = 0;
+            vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
+            vhost_table_entry_attr[4].value.u32 = 0;
+            vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
+            vhost_table_entry_attr[5].value.u32 = 0;
+            vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
+            vhost_table_entry_attr[6].value.u32 = 0;
 
-            // status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
-            // if (status != SAI_STATUS_SUCCESS) {
-            //     SWSS_LOG_ERROR("Failed to create table_vhost default entry");
-            //     throw "BMToR initialization failure";
-            // }
-            it = consumer.m_toSync.erase(it);
+            status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
+            if (status != SAI_STATUS_SUCCESS) {
+                SWSS_LOG_ERROR("Failed to create table_vhost default entry");
+                throw "BMToR initialization failure";
+            }
+        } else if (op == DEL_COMMAND) {
+            SWSS_LOG_NOTICE("REMOVE VNET_ROUTE_TUNNEL_TABLE");
+            getVhostEntry(key, peering_entry);
+            status = sai_bmtor_api->remove_table_peering_entry(peering_entry);
+            if (status != SAI_STATUS_SUCCESS) {
+                SWSS_LOG_ERROR("Failed to remove table_peering entry");
+                throw "BMToR de-init failure";
+            }
         }
+        it = consumer.m_toSync.erase(it);
+    }
+}
+
+void BmToRCacheOrch::setVhostEntry(std::string key, sai_object_id_t entry_id)
+{
+    vhost_entries[key] = entry_id;
+}
+
+bool BmToRCacheOrch::getVhostEntry(std::string key, sai_object_id_t &entry_id)
+{
+    SWSS_LOG_ENTER();
+
+    if (vhost_entries.find(key) == vhost_entries.end())
+    {
+        return false;
+    }
+    else
+    {
+        entry_id = vhost_entries[key];
+        return true;
     }
 }
 
@@ -263,4 +332,12 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
 
 sai_object_id_t BmToRCacheOrch::getDPDKPort() {
   return dpdk_port;
+}
+
+uint16_t BmToRCacheOrch::GetVnetBitmap(uint32_t vni) {
+  return gVnetBitmap;
+}
+
+sai_object_id_t BmToRCacheOrch::GetTunnelID() {
+  return gTunnelId;
 }
