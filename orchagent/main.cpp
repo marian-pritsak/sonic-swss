@@ -396,39 +396,39 @@ int main(int argc, char **argv)
     }
 
     /** bmt main */
-    bmt_init_status_t bmt_common_init;
-    memset(&bmt_common_init, 0, sizeof(bmt_common_init));
-    if (bmt_init(&bmt_common_init) != 0){
-        cout << "bmt app will not run. SWSS still running." << endl;
-        exit(1);
-    }
+    // bmt_init_status_t bmt_common_init;
+    // memset(&bmt_common_init, 0, sizeof(bmt_common_init));
+    // if (bmt_init(&bmt_common_init) != 0){
+    //     cout << "bmt app will not run. SWSS still running." << endl;
+    //     exit(1);
+    // }
     gExitFlag      = false;
-    gScanDpdkPort  = false;
+    gScanDpdkPort  = true;
     char cache_toggle;
-    while (!gExitFlag){
+    // while (!gExitFlag){
         cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
-        cin >> cache_toggle;
-        if (cache_toggle == 'c') {
-            gScanDpdkPort = !gScanDpdkPort;
-            cout << ">>> toggeling cache state to " << gScanDpdkPort << endl;
-            if (gScanDpdkPort){
+        // cin >> cache_toggle;
+        // if (cache_toggle == 'c') {
+        //     gScanDpdkPort = !gScanDpdkPort;
+        //     cout << ">>> toggeling cache state to " << gScanDpdkPort << endl;
+            // if (gScanDpdkPort){
 /*
               thread t1_cache_inserter(bmt_cache_inserter);
               thread t2_cache_evacuator(bmt_cache_evacuator);
               t1_cache_inserter.detach();
               t2_cache_evacuator.detach();
 */
-bmt_cache_start();
+            bmt_cache_start();
                
-            }
-        }
-        else if (cin.fail() || cache_toggle != 'c'){
-          cin.clear();
-          cin.ignore();
-          cout << ">>> Incorrect entry."<<endl;
-          cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
-        }
-    }
-    bmt_deinit(&bmt_common_init);
+    //         }
+    //     }
+    //     else if (cin.fail() || cache_toggle != 'c'){
+    //       cin.clear();
+    //       cin.ignore();
+    //       cout << ">>> Incorrect entry."<<endl;
+    //       cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
+    //     }
+    // }
+    // bmt_deinit(&bmt_common_init);
     return 0;
 }
