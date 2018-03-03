@@ -24,6 +24,21 @@ extern "C" {
 #include <string.h>
 #include "portsorch.h"
 
+
+#include <linux/if_packet.h>
+//#include <linux/ip.h>
+//#include <linux/udp.h>
+//#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <netinet/ether.h>
+#include <ctime>
+#include <cstdlib>
+
+
 using namespace std;
 extern sai_hostif_api_t *sai_hostif_api;
 extern sai_samplepacket_api_t *sai_samplepacket_api;
@@ -35,6 +50,7 @@ extern sai_bmtor_api_t *sai_bmtor_api;
 extern PortsOrch *gPortsOrch;
 
 typedef struct bmt_dpdk_pkt_t {
+    bool valid;
     sai_object_id_t trap_id; // TODO check if needed.
     sai_object_id_t in_port; // just checking to be dpdk exclusive.
     sai_object_id_t in_lag; // just checking to be dpdk exclusive.
@@ -77,79 +93,46 @@ sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
 extern bool gScanDpdkPort;
 
-sai_status_t bmt_parse_packet(uint8_t* buffer, sai_size_t buffer_size, uint32_t attr_count, sai_attribute_t sai_packet_attr[3], bmt_dpdk_pkt_t *pkt){
-    // omers: assuming vlan(for encoding inport log) + ipv4.
-    /* parse trap packet attr */
-    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-    SWSS_LOG_ERROR("marianp ===============================================================");
-    SWSS_LOG_ERROR("marianp [recv] Packet recv info:");
-    for (int i =0 ; i<3 ; i++){
-        switch (sai_packet_attr[i].id) {
-            case SAI_HOSTIF_PACKET_ATTR_HOSTIF_TRAP_ID:
-                pkt->trap_id = sai_packet_attr[i].value.oid;
-                break;
-            case SAI_HOSTIF_PACKET_ATTR_INGRESS_PORT:
-                pkt->in_port = sai_packet_attr[i].value.oid;
-                break;
-            case SAI_HOSTIF_PACKET_ATTR_INGRESS_LAG:
-                pkt->in_lag = sai_packet_attr[i].value.oid;
-                break;
-            default:
-                SWSS_LOG_ERROR("fd packet attr was not parsed, id: %u ,value: 0x%lx", sai_packet_attr[i].id, sai_packet_attr[i].value.oid);
-                return (SAI_STATUS_FAILURE);
-        }
-    }
-    SWSS_LOG_ERROR("trap oid: 0x%lx", pkt->trap_id);
-    SWSS_LOG_ERROR("Packet size: %lu", buffer_size);
-
-    uint16_t etherType[3];
+sai_status_t bmt_parse_packet(uint8_t* buff, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
+//--------------------------------------
+// netdev encap via ip4 packet: so vxlan is shifted:
+// L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
+    pkt->valid = false;
+    uint16_t etherType[2];
+    uint8_t vxlan_flags;
     uint8_t inner_ipv4_ver;
     uint8_t outer_ipv4_ver;
     if (buffer_size >= 84){ // TODO should be 84
-        etherType[0] = (uint16_t)(((uint16_t)buffer[12]<<8)|(uint16_t)buffer[13]); // outer etherType (tagged)
-        etherType[1] = (uint16_t)(((int)buffer[16]<<8U)|(int)buffer[17]); // Vlan etherType
-        etherType[2] = (uint16_t)(((int)buffer[62]<<8)|(int)buffer[63]); // inner etherType
-        outer_ipv4_ver = (uint8_t)(buffer[18]>>3);
-        inner_ipv4_ver = (uint8_t)(buffer[64]>>3);
-        
-
+        etherType[0]   = (uint16_t)(((uint16_t)buf[12]<<8)|(uint16_t)buf[13]); // outer L2 etherType (tagged)
+        outer_ipv4_ver = (uint8_t)(buf[14]>>4);
+        vxlan_flags    = (uint8_t) buf[42]; // inner L2 etherType
+        etherType[1]   = (uint16_t)(((int)buf[62]<<8)|(int)buf[63]); // inner etherType
+        inner_ipv4_ver = (uint8_t)(buf[64]>>4);      
         if(
-            etherType[0] == TYPE_VLAN &&
-            etherType[1] == TYPE_IPV4 &&
-            etherType[2] == TYPE_IPV4 &&
-            outer_ipv4_ver == 4 &&
-            inner_ipv4_ver == 4
+            etherType[0]    == TYPE_IPV4 &&
+            etherType[1]    == TYPE_IPV4 &&
+            vxlan_flags     == 8         &&
+            outer_ipv4_ver  == 4         &&
+            inner_ipv4_ver  == 4
         )
         {
-            pkt->vni = (((uint16_t)buffer[14]>>4)<<8)|buffer[15];
-            pkt->underlay_dip = ((uint32_t)buffer[34]<<24) | ((uint32_t)buffer[35]<<16) | ((uint32_t)buffer[36]<<8) | ((uint32_t)buffer[37]); 
-            pkt->overlay_dip = ((uint32_t)buffer[80]<<24) | ((uint32_t)buffer[81]<<16) | ((uint32_t)buffer[82]<<8) | ((uint32_t)buffer[83]); 
-            SWSS_LOG_ERROR("packet parsed successfully:");
-            //SWSS_LOG_ERROR("   underlay ip="<< buffer[34]<< "."<< buffer[35]<< "."<< buffer[36]<< "."<< buffer[37]<< endl;
-            //SWSS_LOG_ERROR("   overlay  ip="<< buffer[80]<< "."<< buffer[81]<< "."<< buffer[82]<< "."<< buffer[83]<< endl;
-            //SWSS_LOG_ERROR("   vid= "<< pkt->vni << endl;
+            pkt->valid = true;
+            pkt->vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
+            pkt->underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
+            pkt->overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
+            SWSS_LOG_INFO("[inserter] [recv] packet parsed successfully:");
+            SWSS_LOG_INFO("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]).int(buf[33]))
+            SWSS_LOG_INFO("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]).int(buf[83]));
+            SWSS_LOG_INFO("[inserter] [recv]    vni= %d",int(pkt->vni));
         }
-        else{
-            SWSS_LOG_ERROR("Bad parse / not vlan ipv4 packet"); 
-            //cout << "   outer L2    etherType: 0x"<< hex << etherType[0] << endl;
-            //cout << "   vlan        etherType: 0x"<< hex << etherType[1] << endl;
-            //cout << "   inner L2    etherType: 0x"<< hex << etherType[2] << endl;
-            //cout << "   outer_ipv4_ver: "<< dec << outer_ipv4_ver <<endl;
-            //cout << "   inner_ipv4_ver: "<< dec << inner_ipv4_ver <<endl;
-            //cout << "   Packet content:" << endl;
-            //for (uint8_t i=0; i<buffer_size;i++){
-            //    if (i and (0 == i % 16)){cout << endl;}
-            //    cout << hex << buffer[i];
-            //}
-            //cout << dec << endl;
+        else {
+            SWSS_LOG_INFO("[inserter] [recv] not vxlan packet")
         }
     }
-    else{
-        SWSS_LOG_ERROR("packet too short: %lu bytes, expecting 84 bytes", buffer_size);
-        return (SAI_STATUS_FAILURE);
+    else {
+            SWSS_LOG_INFO("[inserter] [recv] short packet")
     }
-    SWSS_LOG_ERROR("===============================================================");
-    return (SAI_STATUS_SUCCESS);
+    return SAI_STATUS_SUCCESS;
 }
 
 sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
@@ -159,16 +142,16 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
             vhost_table.free_offsets.pop_back();
-            SWSS_LOG_ERROR("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
+            SWSS_LOG_INFO("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
             return SAI_STATUS_SUCCESS;
         }
         else{
-            SWSS_LOG_ERROR("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
+            SWSS_LOG_INFO("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
             return SAI_STATUS_FAILURE;
         }
     }
     else{
-        SWSS_LOG_ERROR("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
+        SWSS_LOG_INFO("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -230,12 +213,9 @@ sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_d
 }
 
 /* receive flow */
-int bmt_recv(){
+int bmt_recv(int sockfd){
     SWSS_LOG_ERROR("[inserter] starting recive channel");
-    uint8_t buffer[CONTROL_MTU] ; 
-    sai_size_t buffer_size;
-    uint32_t attr_count;
-    sai_attribute_t sai_packet_attr[3];
+    uint8_t buf[BUF_SIZE];
     sai_status_t status;
     bmt_dpdk_pkt_t pkt;
 
@@ -243,23 +223,21 @@ int bmt_recv(){
     { 
         SWSS_LOG_ERROR("[inserter] listening...");
         attr_count = 3;
-        buffer_size = CONTROL_MTU;
-        status = sai_hostif_api->recv_hostif_packet(hostifOid, buffer, &buffer_size, &attr_count, sai_packet_attr);
-        sleep(5);
-        if (status != SAI_STATUS_SUCCESS){
-            SWSS_LOG_ERROR("[inserter] ERROR: BMtor_dpdk_sampler :  sai_recv_hostif_packet , status %d", status);
-            continue;
-        }
-        status = bmt_parse_packet(buffer, buffer_size, attr_count, sai_packet_attr,&pkt);
+        buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+        sleep(1); // TODO remove!!!
+        status = bmt_parse_packet(buf, buffer_size,&pkt);
         if (status != SAI_STATUS_SUCCESS){
             SWSS_LOG_ERROR("[inserter] ERROR: BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
             continue;
-
-	// TODO - fix parsing
-        uint16_t port_vect = 0; //??
-	sai_object_id_t tunnel_id = 0; //??
-        status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
         }
+        if (!pkt.valid) continue;
+        
+        uint16_t port_vect;
+    	sai_object_id_t tunnel_id = 0; //??
+        status = bmt_get_port_vect_from_vni(,pkt.vni,&port_vect); //??
+        if (status) continue;
+        status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
+        
     }
     SWSS_LOG_ERROR("[inserter] INFO: killing process.");
     return 0;
@@ -481,68 +459,69 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
 //     // SWSS_LOG_NOTICE("TODO implement");
 // }
 
+int create_sampler_socket(int* sockfd_p){
+    int ret, i;
+    int sockopt;
+    struct ifreq ifopts;    /* set promiscuous mode */
+    uint8_t buf[BUF_SIZE];
+    char ifName[IFNAMSIZ];
+    bmt_dpdk_pkt_t pktt;
+    bmt_dpdk_pkt_t *pkt = &pktt;
+    
+    /* Get interface name */
+    strcpy(ifName, DEFAULT_IF);
 
-/* helper functions */
-/*
-sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port) {
-    cout << "[inserter] sai_get_port_id_by_front_port" << endl;
-    sai_object_id_t new_objlist[32]; //TODO change back to getting from switch
-    sai_attribute_t sai_attr;
-    sai_attr.id = SAI_SWITCH_ATTR_PORT_NUMBER;
-    // switch_api->get_switch_attribute(switch_id, 1, &sai_attr);
-    uint32_t max_ports = 32; //sai_attr.value.u32;
-
-    sai_attr.id = SAI_SWITCH_ATTR_PORT_LIST;
-    //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
-    sai_attr.value.objlist.count = max_ports;
-    sai_attr.value.objlist.list = &new_objlist[0];
-    sai_switch_api.get_switch_attribute(gSwitchId, 1, &sai_attr);
-    printf("[inserter] port list\n");
-
-    sai_attribute_t hw_lane_list_attr;
-
-    for (uint32_t i = 0; i < max_ports; i++) {
-        uint32_t hw_port_list[4];
-        hw_lane_list_attr.id = SAI_PORT_ATTR_HW_LANE_LIST;
-        hw_lane_list_attr.value.u32list.list = &hw_port_list[0];
-        hw_lane_list_attr.value.u32list.count = 4;
-        cout << "[inserter] port sai_object_id " << sai_attr.value.objlist.list[i] << endl;
-        sai_port_api.get_port_attribute(sai_attr.value.objlist.list[i], 1,
-                                        &hw_lane_list_attr);
-        printf("[inserter] hw lanes: %d %d %d %d\n", hw_port_list[0], hw_port_list[1], hw_port_list[2], hw_port_list[3]);
-        if (hw_port_list[0] == ((hw_port - 1) * 4)) {
-            // free(hw_lane_list_attr.value.u32list.list);
-            // free(sai_attr.value.objlist.list);
-            return sai_attr.value.objlist.list[i];
-        }
-    // free(hw_lane_list_attr.value.u32list.list);
+    /* Open PF_PACKET socket, listening for EtherType ETHER_TYPE */
+    if ((*sockfd_p = socket(PF_PACKET, SOCK_RAW, htons(ETHER_TYPE))) == -1) {
+        perror("listener: socket"); 
+        return(SAI_STATUS_FAILURE);
     }
-    // free(sai_attr.value.objlist.list);
-    cout << "[inserter] ERROR didn't find port" << endl;
-    return -1;
-}
 
-*/
+    /* Set interface to promiscuous mode - do we need to do this every time? */
+    strncpy(ifopts.ifr_name, ifName, IFNAMSIZ-1);
+    ioctl(*sockfd_p, SIOCGIFFLAGS, &ifopts);
+    ifopts.ifr_flags |= IFF_PROMISC;
+    ioctl(*sockfd_p, SIOCSIFFLAGS, &ifopts);
+    /* Allow the socket to be reused - incase connection is closed prematurely */
+    if (setsockopt(*sockfd_p, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof sockopt) == -1) {
+        perror("setsockopt");
+        close(*sockfd_p);
+        return(SAI_STATUS_FAILURE);
+    }
+    /* Bind to device */
+    if (setsockopt(*sockfd_p, SOL_SOCKET, SO_BINDTODEVICE, ifName, IFNAMSIZ-1) == -1)  {
+        perror("SO_BINDTODEVICE");
+        close(*sockfd_p);
+        return(SAI_STATUS_FAILURE);
+    }
+    return (SAI_STATUS_SUCCESS);
+}
 
 /* main */
 int bmt_cache_inserter(void)
 {
+    int sockfd;
+    // we wait untill swss finish init - (runing async)
 	sleep(60);
     /* get dpdk port */
-    SWSS_LOG_ERROR("[inserter] DEBUG: initialization started.");
+    SWSS_LOG_INFO("[inserter] DEBUG: initialization started.");
     dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT);
 
-    SWSS_LOG_ERROR("[inserter] DEBUG: found dpdk port.");
+    SWSS_LOG_INFO("[inserter] DEBUG: found dpdk port.");
     /* init dpdk port trapping via acl*/
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
-    SWSS_LOG_ERROR("[inserter] DEBUG: initialization finished. status: %d", sampler_init_status);
-
-    /* listen to traffic on dpdk port */
-    if (sampler_init_status==0) { // only on init success
-        bmt_recv(); 
+    SWSS_LOG_INFO("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
+    if (sampler_init_status==0) { // only on init success    
+        int socket_status = create_sampler_socket(&sockfd);
+        SWSS_LOG_INFO("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
+        if (socket_status==SAI_STATUS_SUCCESS) { // only on init success
+        /* listen to traffic on dpdk port */
+            bmt_recv(sockfd); 
+        }
+        close(sockfd);
     }
     /* deinit dpdk port trapping via acl*/
-    SWSS_LOG_ERROR("[inserter] DEBUG: dpdk listening done, deiniting:"); 
+    SWSS_LOG_INFO("[inserter] DEBUG: dpdk listening done, deiniting:"); 
     int rc = bmt_deinit_dpdk_traffic_sampler(sampler_init_status);
     return(rc);
 
