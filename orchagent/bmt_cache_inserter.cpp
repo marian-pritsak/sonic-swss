@@ -93,10 +93,11 @@ sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
 extern bool gScanDpdkPort;
 
-sai_status_t bmt_parse_packet(uint8_t* buff, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
+sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
 //--------------------------------------
 // netdev encap via ip4 packet: so vxlan is shifted:
 // L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
+    SWSS_LOG_ERROR("[inserter] [recv] parsing packet");
     pkt->valid = false;
     uint16_t etherType[2];
     uint8_t vxlan_flags;
@@ -120,17 +121,17 @@ sai_status_t bmt_parse_packet(uint8_t* buff, sai_size_t buffer_size, bmt_dpdk_pk
             pkt->vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
             pkt->underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
             pkt->overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
-            SWSS_LOG_INFO("[inserter] [recv] packet parsed successfully:");
-            SWSS_LOG_INFO("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]).int(buf[33]))
-            SWSS_LOG_INFO("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]).int(buf[83]));
-            SWSS_LOG_INFO("[inserter] [recv]    vni= %d",int(pkt->vni));
+            SWSS_LOG_ERROR("[inserter] [recv] packet parsed successfully:");
+            SWSS_LOG_ERROR("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
+            SWSS_LOG_ERROR("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]));
+            SWSS_LOG_ERROR("[inserter] [recv]    vni= %d",int(pkt->vni));
         }
         else {
-            SWSS_LOG_INFO("[inserter] [recv] not vxlan packet")
+            SWSS_LOG_ERROR("[inserter] [recv] not vxlan packet");
         }
     }
     else {
-            SWSS_LOG_INFO("[inserter] [recv] short packet")
+            SWSS_LOG_ERROR("[inserter] [recv] short packet");
     }
     return SAI_STATUS_SUCCESS;
 }
@@ -142,16 +143,16 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
             vhost_table.free_offsets.pop_back();
-            SWSS_LOG_INFO("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
+            SWSS_LOG_ERROR("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
             return SAI_STATUS_SUCCESS;
         }
         else{
-            SWSS_LOG_INFO("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
+            SWSS_LOG_ERROR("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
             return SAI_STATUS_FAILURE;
         }
     }
     else{
-        SWSS_LOG_INFO("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
+        SWSS_LOG_ERROR("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -216,14 +217,15 @@ sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_d
 int bmt_recv(int sockfd){
     SWSS_LOG_ERROR("[inserter] starting recive channel");
     uint8_t buf[BUF_SIZE];
+    ssize_t buffer_size;
     sai_status_t status;
     bmt_dpdk_pkt_t pkt;
 
     while(gScanDpdkPort)
     { 
-        SWSS_LOG_ERROR("[inserter] listening...");
-        attr_count = 3;
+        SWSS_LOG_ERROR("[inserter] listening ...");
         buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+        SWSS_LOG_ERROR("[inserter] recv packet, size = %lu",buffer_size);
         sleep(1); // TODO remove!!!
         status = bmt_parse_packet(buf, buffer_size,&pkt);
         if (status != SAI_STATUS_SUCCESS){
@@ -231,12 +233,12 @@ int bmt_recv(int sockfd){
             continue;
         }
         if (!pkt.valid) continue;
-        
+
         uint16_t port_vect;
-    	sai_object_id_t tunnel_id = 0; //??
-        status = bmt_get_port_vect_from_vni(,pkt.vni,&port_vect); //??
+    	//sai_object_id_t tunnel_id = 0; //??
+        status = bmt_get_port_vect_from_vni(pkt.vni,&port_vect); //??
         if (status) continue;
-        status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
+        // TODO status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
         
     }
     SWSS_LOG_ERROR("[inserter] INFO: killing process.");
@@ -460,13 +462,9 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
 // }
 
 int create_sampler_socket(int* sockfd_p){
-    int ret, i;
     int sockopt;
     struct ifreq ifopts;    /* set promiscuous mode */
-    uint8_t buf[BUF_SIZE];
     char ifName[IFNAMSIZ];
-    bmt_dpdk_pkt_t pktt;
-    bmt_dpdk_pkt_t *pkt = &pktt;
     
     /* Get interface name */
     strcpy(ifName, DEFAULT_IF);
@@ -504,16 +502,16 @@ int bmt_cache_inserter(void)
     // we wait untill swss finish init - (runing async)
 	sleep(60);
     /* get dpdk port */
-    SWSS_LOG_INFO("[inserter] DEBUG: initialization started.");
+    SWSS_LOG_ERROR("[inserter] DEBUG: initialization started.");
     dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT);
 
-    SWSS_LOG_INFO("[inserter] DEBUG: found dpdk port.");
+    SWSS_LOG_ERROR("[inserter] DEBUG: found dpdk port.");
     /* init dpdk port trapping via acl*/
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
-    SWSS_LOG_INFO("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
+    SWSS_LOG_ERROR("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
     if (sampler_init_status==0) { // only on init success    
         int socket_status = create_sampler_socket(&sockfd);
-        SWSS_LOG_INFO("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
+        SWSS_LOG_ERROR("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
         if (socket_status==SAI_STATUS_SUCCESS) { // only on init success
         /* listen to traffic on dpdk port */
             bmt_recv(sockfd); 
@@ -521,7 +519,7 @@ int bmt_cache_inserter(void)
         close(sockfd);
     }
     /* deinit dpdk port trapping via acl*/
-    SWSS_LOG_INFO("[inserter] DEBUG: dpdk listening done, deiniting:"); 
+    SWSS_LOG_ERROR("[inserter] DEBUG: dpdk listening done, deiniting:"); 
     int rc = bmt_deinit_dpdk_traffic_sampler(sampler_init_status);
     return(rc);
 

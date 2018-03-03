@@ -11,6 +11,7 @@
 #define DEFAULT_IF	"Ethernet24" // sampler socket
 #define BUF_SIZE		1024 // sampler buffer size
 #define CONTROL_MTU 1100 //TODO
+#define ETHER_TYPE	0x0800
 #define TYPE_VLAN 0x8100
 #define TYPE_IPV4 0x0800
 #define CACHE_EVAC_SIZE (1) // the number of expected elements in vhost_table.free_offsets
