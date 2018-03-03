@@ -30,7 +30,6 @@ private:
     void doVnetIntfTask(Consumer &consumer);
     void doVxlanTunnelTask(Consumer &consumer);
     void doTask(Consumer &consumer);
-    bool tunnel_created;
     sai_object_id_t gTunnelId;
     sai_object_id_t default1Qbridge;
     sai_object_id_t default_vhost_table_entry;

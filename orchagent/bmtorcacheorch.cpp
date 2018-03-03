@@ -27,7 +27,6 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
 {
     SWSS_LOG_ENTER();
-    tunnel_created = false;
     // gVtepIp = htonl(0x0a000014); // 10.0.0.20 // TODO remove
     // gVNI = 8;   // TODO remove
     gVID = 120; // TODO remove
