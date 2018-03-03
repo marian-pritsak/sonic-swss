@@ -54,6 +54,7 @@ string gRecordFile;
 
 bool gExitFlag     = false;
 bool gScanDpdkPort = true;
+bool gFlashCache   = false;
 
 
 /* Global database mutex */

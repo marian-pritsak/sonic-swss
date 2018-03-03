@@ -89,6 +89,8 @@ sai_object_id_t hostif_table_entryOid;
 sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
 extern bool gScanDpdkPort;
+extern bool gFlashCache;
+extern bool gExitFlag;
 
 sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
 //--------------------------------------
@@ -136,7 +138,6 @@ sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt
 sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
     if (vhost_table.used_entries > (VHOST_TABLE_SIZE-2)){
         //TODO take from free list when cache evac is working.
-        lock_guard<mutex> guard(vhost_table.free_offset_mutex);
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
             vhost_table.free_offsets.pop_back();
@@ -164,7 +165,7 @@ sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
 }
 
 sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_dip, uint32_t underlay_dip, sai_object_id_t tunnel_id){
-
+    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     uint32_t offset;
     sai_status_t status = bmt_get_free_offset(&offset);
     if (status != SAI_STATUS_SUCCESS){ return status; }
@@ -535,6 +536,15 @@ void bmt_cache_remove_rule(vector<bmt_rule_evac_candidate_t>* evac_candidates){
     vhost_table.free_offsets.push_back(offset);
 }
 
+void bmt_flash_cache(){
+    // TODO - protect from removal of non existing entry?
+    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    for (uint32_t i=0 ; i<vhost_table.used_entries ; i++){
+        sai_bmtor_api->remove_table_vhost_entry(vhost_table.entry[i].entry_id);
+    }
+    vhost_table.used_entries = 0;
+    vhost_table.free_offsets.clear();
+}
 
 void bmt_cache_evacuator(){
     vector<bmt_rule_evac_candidate_t> evac_candidates;
@@ -543,7 +553,8 @@ void bmt_cache_evacuator(){
     bmt_rule_evac_candidate_t evac_candidate;
     uint32_t batch_start;
     uint32_t batch_end = 0;
-    while (gScanDpdkPort){
+    while (!gExitFlag){
+        if (gFlashCache) bmt_flash_cache();
         if ( vhost_table.used_entries > (VHOST_TABLE_SIZE-2 )){ // 1 is default, 1 is to start before table is full
             if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
                  (evac_candidates.size() > 0) )
