@@ -544,6 +544,7 @@ void bmt_flash_cache(){
     }
     vhost_table.used_entries = 0;
     vhost_table.free_offsets.clear();
+    gFlashCache = false;
 }
 
 void bmt_cache_evacuator(){
