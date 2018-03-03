@@ -67,7 +67,7 @@ orchagent_SOURCES = \
 		    bmt_cache_inserter.h \
 		    bmt_common.h \
 		    bmt_orch_constants.h \
-		    bmtoracheorch.h
+		    bmtorcacheorch.h
 
 
 orchagent_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_SAI)
