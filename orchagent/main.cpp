@@ -23,6 +23,8 @@ extern "C" {
 #include "notifications.h"
 #include <signal.h>
 
+#include "bmt_common.h"
+
 using namespace std;
 using namespace swss;
 
@@ -49,6 +51,11 @@ bool gSwssRecord = true;
 bool gLogRotate = false;
 ofstream gRecordOfs;
 string gRecordFile;
+
+bool gExitFlag     = false;
+bool gScanDpdkPort = true;
+bool gFlashCache   = false;
+
 
 /* Global database mutex */
 mutex gDbMutex;
@@ -82,6 +89,14 @@ void sighup_handler(int signo)
     {
         sai_switch_api->set_switch_attribute(gSwitchId, &attr);
     }
+}
+
+void sig_handler(int signo){
+    if (signo == SIGINT){
+       gScanDpdkPort=false;
+       gExitFlag=true;
+
+    } 
 }
 
 // sai_object_id_t
@@ -186,7 +201,7 @@ int main(int argc, char **argv)
         SWSS_LOG_ERROR("failed to setup SIGHUP action");
         exit(1);
     }
-
+    signal(SIGINT, sig_handler); // bmt_addition
     int opt;
     sai_status_t status;
 
@@ -355,6 +370,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    bmt_cache_start();
+
     try
     {
         SWSS_LOG_NOTICE("Notify syncd APPLY_VIEW");
@@ -380,5 +397,40 @@ int main(int argc, char **argv)
     {
         SWSS_LOG_ERROR("Failed due to exception: %s", e.what());
     }
+
+    /** bmt main */
+    // bmt_init_status_t bmt_common_init;
+    // memset(&bmt_common_init, 0, sizeof(bmt_common_init));
+    // if (bmt_init(&bmt_common_init) != 0){
+    //     cout << "bmt app will not run. SWSS still running." << endl;
+    //     exit(1);
+    // }
+    gExitFlag      = false;
+    gScanDpdkPort  = true;
+    // char cache_toggle;
+    // while (!gExitFlag){
+        cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
+        // cin >> cache_toggle;
+        // if (cache_toggle == 'c') {
+        //     gScanDpdkPort = !gScanDpdkPort;
+        //     cout << ">>> toggeling cache state to " << gScanDpdkPort << endl;
+            // if (gScanDpdkPort){
+/*
+              thread t1_cache_inserter(bmt_cache_inserter);
+              thread t2_cache_evacuator(bmt_cache_evacuator);
+              t1_cache_inserter.detach();
+              t2_cache_evacuator.detach();
+*/
+               
+    //         }
+    //     }
+    //     else if (cin.fail() || cache_toggle != 'c'){
+    //       cin.clear();
+    //       cin.ignore();
+    //       cout << ">>> Incorrect entry."<<endl;
+    //       cout << ">>> BM TOR demo running. Type 'c' to toggle spectrum cache. ctrl+c to exit." << endl;
+    //     }
+    // }
+    // bmt_deinit(&bmt_common_init);
     return 0;
 }
