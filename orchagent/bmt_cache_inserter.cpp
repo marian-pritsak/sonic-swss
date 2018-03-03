@@ -26,9 +26,6 @@ extern "C" {
 
 
 #include <linux/if_packet.h>
-//#include <linux/ip.h>
-//#include <linux/udp.h>
-//#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
@@ -226,14 +223,13 @@ int bmt_recv(int sockfd){
         SWSS_LOG_ERROR("[inserter] listening ...");
         buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
         SWSS_LOG_ERROR("[inserter] recv packet, size = %lu",buffer_size);
-        sleep(1); // TODO remove!!!
         status = bmt_parse_packet(buf, buffer_size,&pkt);
         if (status != SAI_STATUS_SUCCESS){
             SWSS_LOG_ERROR("[inserter] ERROR: BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
             continue;
         }
         if (!pkt.valid) continue;
-
+        sleep(1); // TODO remove!!!
         uint16_t port_vect;
     	//sai_object_id_t tunnel_id = 0; //??
         status = bmt_get_port_vect_from_vni(pkt.vni,&port_vect); //??
@@ -525,26 +521,66 @@ int bmt_cache_inserter(void)
 
 }
 
+typedef struct _bmt_rule_evac_candidate_t{
+    uint32_t offset;
+    uint64_t read;
+} bmt_rule_evac_candidate_t;
 
-int bmt_cache_evacuator(void){
-	while (gScanDpdkPort){
-		if ((vhost_table.used_entries > (VHOST_TABLE_SIZE-2)) && vhost_table.free_offsets.size()<CACHE_EVAC_SIZE){
-			// TODO loop over all entries, read counters and catch the mice flows
-			// TODO remove mice entry
-			lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-			uint32_t offset = 0;
-			SWSS_LOG_ERROR("INFO: cache evacuator freeing vhost table offset %u", offset);
-			sai_bmtor_api->remove_table_vhost_entry(vhost_table.entry[offset].entry_id);
-			vhost_table.free_offsets.push_back(offset);
-		}
-		
-	}
-	return 0;
+void bmt_cache_remove_rule(vector<bmt_rule_evac_candidate_t>* evac_candidates){
+    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    uint32_t offset = (evac_candidates->back()).offset;
+    evac_candidates->pop_back();
+    SWSS_LOG_ERROR( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
+    sai_bmtor_api->remove_table_vhost_entry(vhost_table.entry[offset].entry_id);
+    vhost_table.free_offsets.push_back(offset);
+}
+
+
+void bmt_cache_evacuator(){
+    vector<bmt_rule_evac_candidate_t> evac_candidates;
+    uint32_t counter_values[EVAC_BATCH_SIZE];
+    uint32_t counter_diff[EVAC_BATCH_SIZE];
+    bmt_rule_evac_candidate_t evac_candidate;
+    uint32_t batch_start;
+    uint32_t batch_end = 0;
+    while (gScanDpdkPort){
+        if ( vhost_table.used_entries > (VHOST_TABLE_SIZE-2 )){ // 1 is default, 1 is to start before table is full
+            if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
+                 (evac_candidates.size() > 0) )
+            {
+                bmt_cache_remove_rule(&evac_candidates);
+            }
+                // TODO ADAPTIVE treshold
+            if (evac_candidates.size() < CACHE_EVAC_SIZE)
+            {
+                batch_start = batch_end; 
+                batch_end = (batch_start + EVAC_BATCH_SIZE)%VHOST_TABLE_SIZE;
+                // seperate loops for constant read interval time.
+                for (uint32_t i=batch_start ; i<batch_end; i++ ){
+                    //counter_read_by_offset(&counter_values[i-batch_start]);
+                }
+                for (uint32_t i=batch_start ; i<batch_end; i++ ){
+                    //counter_read_by_offset(&counter_diff[i-batch_start]);
+                    // TODO - maybe devide by time interval to normalize.
+                    counter_diff[i-batch_start] -= counter_values[i-batch_start];
+                }
+                for (uint32_t i=batch_start ; i<batch_end; i++ ){
+                    if (counter_diff[i-batch_start] < EVAC_TRESH){
+                        evac_candidate.offset = i;
+                        evac_candidate.read = counter_diff[i-batch_start];
+                        evac_candidates.push_back(evac_candidate);
+                        SWSS_LOG_ERROR("[evac] INFO: added evac candidate: offset: %d , counter delta: %d",i,counter_diff[i-batch_start]);
+                    }
+                }
+            }
+        }
+    }
 }
 
 void bmt_cache_start() {
               thread t1_cache_inserter(bmt_cache_inserter);
-              //thread t2_cache_evacuator(bmt_cache_evacuator);
+              thread t2_cache_evacuator(bmt_cache_evacuator);
               t1_cache_inserter.detach();
-              //t2_cache_evacuator.detach();
+              t2_cache_evacuator.detach();
 }
+ 
