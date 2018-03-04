@@ -586,8 +586,8 @@ void bmt_cache_evacuator(){
 
 void bmt_cache_start() {
               thread t1_cache_inserter(bmt_cache_inserter);
-              thread t2_cache_evacuator(bmt_cache_evacuator);
+              // thread t2_cache_evacuator(bmt_cache_evacuator);
               t1_cache_inserter.detach();
-              t2_cache_evacuator.detach();
+              // t2_cache_evacuator.detach();
 }
  
