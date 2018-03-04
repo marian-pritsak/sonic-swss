@@ -18,5 +18,5 @@
 #define EVAC_BATCH_SIZE (3) // number of counters to probe each time
 #define EVAC_TRESH (1*EVAC_BATCH_SIZE) // maximal counter value for evacuation
 #define INSERTER_WINDOW_SIZE 20
-#define INSERTER_TRESH 4 // minimal number of packet from flow in a sampling window for cache insertion
+#define INSERTER_THRESH 4 // minimal number of packet from flow in a sampling window for cache insertion
 #endif /** __BMT_ORCH_CONSTANTS_H_ */

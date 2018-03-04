@@ -57,6 +57,15 @@ typedef struct bmt_dpdk_pkt_t {
     uint32_t vni;
 } bmt_dpdk_pkt_t;
 
+struct bmt_dpdk_pkt_compare_t {
+    bool operator()(const bmt_dpdk_pkt_t &pkt1, const bmt_dpdk_pkt_t &pkt2) const
+    {
+      return (pkt1.underlay_dip == pkt2.underlay_dip)
+          && (pkt1.overlay_dip == pkt2.overlay_dip)
+          && (pkt1.vni == pkt2.vni);
+    }
+};
+
 typedef struct bmt_vhost_entry_t { //TODDO - change to map<offset:entry_id>?
     sai_object_id_t entry_id;
     uint32_t overlay_dip;
@@ -72,6 +81,7 @@ typedef struct bmt_vhost_table_t {
     vector<uint32_t>    free_offsets; // TODO implement cache evac
 } bmt_vhost_table_t;
 
+typedef std::map<bmt_dpdk_pkt_t,uint32_t, bmt_dpdk_pkt_compare_t> DpdkPacketMap;
 
 /* Global variables */
 extern sai_object_id_t gSwitchId;
@@ -186,7 +196,7 @@ int bmt_recv(int sockfd){
     ssize_t buffer_size;
     sai_status_t status;
     bmt_dpdk_pkt_t pkt;
-    map<bmt_dpdk_pkt_t,uint32_t> pkt_map;
+    DpdkPacketMap pkt_map;
     while(gScanDpdkPort)
     { 
         pkt_map.clear();
@@ -200,14 +210,14 @@ int bmt_recv(int sockfd){
                 continue;
             }
             if (!pkt.valid) continue; // TODO decrease i.
-            it = pkt_map.find(pkt);
+            DpdkPacketMap;:iterator it = pkt_map.find(pkt);
             if (it != pkt_map.end())
                 pkt_map[pkt]+=1;
             else 
                 pkt_map[pkt]=1;
         }
-        for(auto const &it_pkt : mymap) {
-            if (it_pkt.second > INSERTER_TRESH){
+        for(auto const &it_pkt : pkt_map) {
+            if (it_pkt.second > INSERTER_THRESH){
                 SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second);
                 sleep(1); // TODO remove!!!
                 status = bmt_cache_insert_vhost_entry(it_pkt.first.overlay_dip, it_pkt.first.underlay_dip, it_pkt.first.vni);
