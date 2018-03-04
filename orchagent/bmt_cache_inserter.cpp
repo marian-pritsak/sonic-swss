@@ -14,6 +14,7 @@ extern "C" {
 #include <signal.h>
 #include <vector>
 #include <set>
+#include <map>
 #include <mutex>
 #include <thread>
 #include "bmt_orch_constants.h"
@@ -90,7 +91,7 @@ sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt
 //--------------------------------------
 // netdev encap via ip4 packet: so vxlan is shifted:
 // L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
-    SWSS_LOG_ERROR("[inserter] [recv] parsing packet");
+    SWSS_LOG_ENTER();
     pkt->valid = false;
     uint16_t etherType[2];
     uint8_t vxlan_flags;
@@ -114,17 +115,17 @@ sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt
             pkt->vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
             pkt->underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
             pkt->overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
-            SWSS_LOG_ERROR("[inserter] [recv] packet parsed successfully:");
-            SWSS_LOG_ERROR("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
-            SWSS_LOG_ERROR("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]));
-            SWSS_LOG_ERROR("[inserter] [recv]    vni= %d",int(pkt->vni));
+            SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:");
+            SWSS_LOG_NOTICE("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
+            SWSS_LOG_NOTICE("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]));
+            SWSS_LOG_NOTICE("[inserter] [recv]    vni= %d",int(pkt->vni));
         }
         else {
-            SWSS_LOG_ERROR("[inserter] [recv] not vxlan packet");
+            SWSS_LOG_NOTICE("[inserter] [recv] not vxlan packet");
         }
     }
     else {
-            SWSS_LOG_ERROR("[inserter] [recv] short packet");
+            SWSS_LOG_NOTICE("[inserter] [recv] short packet");
     }
     return SAI_STATUS_SUCCESS;
 }
@@ -135,16 +136,16 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
             vhost_table.free_offsets.pop_back();
-            SWSS_LOG_ERROR("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
+            SWSS_LOG_NOTICE("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
             return SAI_STATUS_SUCCESS;
         }
         else{
-            SWSS_LOG_ERROR("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
+            SWSS_LOG_NOTICE("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
             return SAI_STATUS_FAILURE;
         }
     }
     else{
-        SWSS_LOG_ERROR("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
+        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -185,22 +186,37 @@ int bmt_recv(int sockfd){
     ssize_t buffer_size;
     sai_status_t status;
     bmt_dpdk_pkt_t pkt;
-
+    map<bmt_dpdk_pkt_t,uint32_t> pkt_map;
     while(gScanDpdkPort)
     { 
-        SWSS_LOG_NOTICE("[inserter] listening ...");
-        buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-        SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
-        status = bmt_parse_packet(buf, buffer_size,&pkt);
-        if (status != SAI_STATUS_SUCCESS){
-            SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
-            continue;
+        pkt_map.clear();
+        for (uint32_t i=0; i<INSERTER_WINDOW_SIZE ; ++i){
+            SWSS_LOG_NOTICE("[inserter] listening ...");
+            buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+            SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
+            status = bmt_parse_packet(buf, buffer_size,&pkt);
+            if (status != SAI_STATUS_SUCCESS){
+                SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
+                continue;
+            }
+            if (!pkt.valid) continue; // TODO decrease i.
+            it = pkt_map.find(pkt);
+            if (it != pkt_map.end())
+                pkt_map[pkt]+=1;
+            else 
+                pkt_map[pkt]=1;
         }
-        if (!pkt.valid) continue;
-        sleep(1); // TODO remove!!!
-        status = bmt_cache_insert_vhost_entry(pkt.overlay_dip, pkt.underlay_dip, pkt.vni);
-        if (status != SAI_STATUS_SUCCESS) 
-            continue;
+        for(auto const &it_pkt : mymap) {
+            if (it_pkt.second > INSERTER_TRESH){
+                SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second);
+                sleep(1); // TODO remove!!!
+                status = bmt_cache_insert_vhost_entry(it_pkt.first.overlay_dip, it_pkt.first.underlay_dip, it_pkt.first.vni);
+                if (status != SAI_STATUS_SUCCESS) 
+                    SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
+            else
+                SWSS_LOG_NOTICE("[inserter] skipping flow insertion, was seen %d times in the window",it_pkt.second);
+            }
+        }
     }
     SWSS_LOG_NOTICE("[inserter] INFO: killing process.");
     return 0;
