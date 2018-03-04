@@ -328,6 +328,19 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) {
     }
 }
 
+sai_status_t BmToRCacheOrch::RemoveTableVhost(sai_object_id_t entry_id) {
+
+  sai_status_t status = sai_bmtor_api->remove_table_vhost_entry(entry_id);
+  if (status != SAI_STATUS_SUCCESS)
+    return status;
+  if (removeVhostEntry(entry_id)) {
+    return SAI_STATUS_SUCCESS;
+  } else {
+    return SAI_STATUS_FAILURE;
+  }
+
+}
+
 sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni) {
   // TODO - create key and add to vhosy_entries map in here
   sai_attribute_t vhost_table_entry_attr[8];
@@ -371,6 +384,16 @@ bool BmToRCacheOrch::getVhostEntry(std::string key, sai_object_id_t &entry_id)
         entry_id = vhost_entries[key];
         return true;
     }
+}
+
+bool BmToRCacheOrch::removeVhostEntry(sai_object_id_t entry_id) {
+  for (map<std::string, sai_object_id_t>::iterator it = vhost_entries.begin(); it != vhost_entries.end(); ++it) {
+    if (it->second == entry_id) {
+      vhost_entries.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 void BmToRCacheOrch::setTunnelIP(std::string key, IpAddress IP)

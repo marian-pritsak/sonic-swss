@@ -19,10 +19,12 @@ extern "C" {
 #include "bmt_orch_constants.h"
 #include "bmt_common.h"
 #include "bmt_cache_inserter.h"
+#include "bmtorcacheorch.h"
 #include "logger.h"
 #include <unistd.h>
 #include <string.h>
 #include "portsorch.h"
+#include "ipprefix.h"
 
 
 #include <linux/if_packet.h>
@@ -45,38 +47,30 @@ extern sai_bmtor_api_t *sai_bmtor_api;
 
 //mutex cout_mutex;
 extern PortsOrch *gPortsOrch;
+extern BmToRCacheOrch *gBmToRCacheOrch;
 
 typedef struct bmt_dpdk_pkt_t {
     bool valid;
-    sai_object_id_t trap_id; // TODO check if needed.
-    sai_object_id_t in_port; // just checking to be dpdk exclusive.
-    sai_object_id_t in_lag; // just checking to be dpdk exclusive.
     uint32_t underlay_dip;
     uint32_t overlay_dip;
     uint32_t vni;
-    sai_object_id_t rule;
 } bmt_dpdk_pkt_t;
 
-typedef struct bmt_vhost_entry_t {
+typedef struct bmt_vhost_entry_t { //TODDO - change to map<offset:entry_id>?
     sai_object_id_t entry_id;
     uint32_t overlay_dip;
     uint32_t underlay_dip;
-    uint16_t port_vect;
-    sai_object_id_t tunnel_id;
+    uint32_t vni;
 }bmt_vhost_entry_t;
 
 
 typedef struct bmt_vhost_table_t {
-    sai_object_id_t     Oid;
     bmt_vhost_entry_t   entry[VHOST_TABLE_SIZE];
     uint32_t            used_entries=0;
     mutex               free_offset_mutex;
     vector<uint32_t>    free_offsets; // TODO implement cache evac
 } bmt_vhost_table_t;
 
-// typedef struct rules_db_t {
-
-// } rules_db_t;
 
 /* Global variables */
 extern sai_object_id_t gSwitchId;
@@ -164,40 +158,14 @@ sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
     return SAI_STATUS_SUCCESS;
 }
 
-sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_dip, uint32_t underlay_dip, sai_object_id_t tunnel_id){
+sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underlay_dip, uint32_t vni){
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     uint32_t offset;
     sai_status_t status = bmt_get_free_offset(&offset);
-    if (status != SAI_STATUS_SUCCESS){ return status; }
 
-    sai_attribute_t attr[7];
-    // TODO can be defined as a global to save time for those fixed arributes, and change only few attrs.
-    attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
-    attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_TUNNEL; 
-
-    attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY;
-    attr[1].value.u32 = offset;
-
-    attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
-    attr[2].value.u16 = 0x0000;
-
-    attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
-    attr[3].value.u16 = 0x0fff & ~port_vect;
-
-    attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
-    attr[4].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
-    attr[4].value.ipaddr.addr.ip4 = htonl(overlay_dip);
-
-    attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_UNDERLAY_DIP;
-    attr[5].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
-    attr[5].value.ipaddr.addr.ip4 = htonl(underlay_dip);
-
-    attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_TUNNEL_ID;
-    attr[6].value.oid = tunnel_id;
-
-	// TODO - ???? 
-    (void)attr;
-    // sai_status_t status = sai_ext_bmtor->sai_create_table_vhost_entry(&vhost_table.entry[offset].entry_id,gSwitchId,7,attr);
+    SWSS_LOG_NOTICE("Vhost Enry creation. underlay dip 0x%x (0x%x). overlay_dip 0x%x. vni %d", underlay_dip, IpAddress(underlay_dip).getIp().ip_addr.ipv4_addr, overlay_dip, vni);
+    sai_object_id_t entry_id;
+    status = gBmToRCacheOrch->CreateVhostEntry(&entry_id, IpAddress(underlay_dip), IpAddress(overlay_dip), vni);
     if (status != SAI_STATUS_SUCCESS){
         SWSS_LOG_ERROR("[inserter] ERROR: failed to insert vhost rule, rv: %u", status);
         return status;
@@ -205,15 +173,14 @@ sai_status_t bmt_cache_insert_vhost_entry(uint16_t port_vect, uint32_t overlay_d
 
     vhost_table.entry[offset].overlay_dip = overlay_dip;
     vhost_table.entry[offset].underlay_dip = underlay_dip;
-    vhost_table.entry[offset].port_vect = port_vect;
-    vhost_table.entry[offset].tunnel_id = tunnel_id;
-    
+    vhost_table.entry[offset].vni = vni;
+    vhost_table.entry[offset].entry_id = entry_id;
     return SAI_STATUS_SUCCESS;
 }
 
 /* receive flow */
 int bmt_recv(int sockfd){
-    SWSS_LOG_ERROR("[inserter] starting recive channel");
+    SWSS_LOG_ENTER();
     uint8_t buf[BUF_SIZE];
     ssize_t buffer_size;
     sai_status_t status;
@@ -221,24 +188,21 @@ int bmt_recv(int sockfd){
 
     while(gScanDpdkPort)
     { 
-        SWSS_LOG_ERROR("[inserter] listening ...");
+        SWSS_LOG_NOTICE("[inserter] listening ...");
         buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-        SWSS_LOG_ERROR("[inserter] recv packet, size = %lu",buffer_size);
+        SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
         status = bmt_parse_packet(buf, buffer_size,&pkt);
         if (status != SAI_STATUS_SUCCESS){
-            SWSS_LOG_ERROR("[inserter] ERROR: BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
+            SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
             continue;
         }
         if (!pkt.valid) continue;
         sleep(1); // TODO remove!!!
-        uint16_t port_vect;
-    	//sai_object_id_t tunnel_id = 0; //??
-        status = bmt_get_port_vect_from_vni(pkt.vni,&port_vect); //??
-        if (status) continue;
-        // TODO status = bmt_cache_insert_vhost_entry(port_vect, pkt.overlay_dip, pkt.underlay_dip, tunnel_id);
-        
+        status = bmt_cache_insert_vhost_entry(pkt.overlay_dip, pkt.underlay_dip, pkt.vni);
+        if (status != SAI_STATUS_SUCCESS) 
+            continue;
     }
-    SWSS_LOG_ERROR("[inserter] INFO: killing process.");
+    SWSS_LOG_NOTICE("[inserter] INFO: killing process.");
     return 0;
 }
 
@@ -500,7 +464,7 @@ int bmt_cache_inserter(void)
 	sleep(60);
     /* get dpdk port */
     SWSS_LOG_ERROR("[inserter] DEBUG: initialization started.");
-    dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT);
+    dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT); // TODO - take from bmtorcache
 
     SWSS_LOG_ERROR("[inserter] DEBUG: found dpdk port.");
     /* init dpdk port trapping via acl*/
@@ -532,7 +496,7 @@ void bmt_cache_remove_rule(vector<bmt_rule_evac_candidate_t>* evac_candidates){
     uint32_t offset = (evac_candidates->back()).offset;
     evac_candidates->pop_back();
     SWSS_LOG_ERROR( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
-    sai_bmtor_api->remove_table_vhost_entry(vhost_table.entry[offset].entry_id);
+    gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
     vhost_table.free_offsets.push_back(offset);
 }
 
@@ -547,10 +511,18 @@ void bmt_flash_cache(){
     gFlashCache = false;
 }
 
+void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
+  sai_bmtor_stat_t counter_id = SAI_BMTOR_STAT_TABLE_VHOST_HIT_OCTETS;
+  SWSS_LOG_NOTICE("reading vhost counter in offset %d", offset);
+  sai_status_t status = sai_bmtor_api->get_bmtor_stats(vhost_table.entry[offset].entry_id, 1, &counter_id, counter);
+  if (status)
+    *counter = 0;
+}
+
 void bmt_cache_evacuator(){
     vector<bmt_rule_evac_candidate_t> evac_candidates;
-    uint32_t counter_values[EVAC_BATCH_SIZE];
-    uint32_t counter_diff[EVAC_BATCH_SIZE];
+    uint64_t counter_values[EVAC_BATCH_SIZE];
+    uint64_t counter_diff[EVAC_BATCH_SIZE];
     bmt_rule_evac_candidate_t evac_candidate;
     uint32_t batch_start;
     uint32_t batch_end = 0;
@@ -569,19 +541,22 @@ void bmt_cache_evacuator(){
                 batch_end = (batch_start + EVAC_BATCH_SIZE)%VHOST_TABLE_SIZE;
                 // seperate loops for constant read interval time.
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
-                    //counter_read_by_offset(&counter_values[i-batch_start]);
+                    counter_read_by_offset(i, &counter_values[i-batch_start]);
+
                 }
+                sleep(1);
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
-                    //counter_read_by_offset(&counter_diff[i-batch_start]);
+                    counter_read_by_offset(i, &counter_diff[i-batch_start]);
                     // TODO - maybe devide by time interval to normalize.
                     counter_diff[i-batch_start] -= counter_values[i-batch_start];
                 }
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
+                    SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
                     if (counter_diff[i-batch_start] < EVAC_TRESH){
                         evac_candidate.offset = i;
                         evac_candidate.read = counter_diff[i-batch_start];
                         evac_candidates.push_back(evac_candidate);
-                        SWSS_LOG_ERROR("[evac] INFO: added evac candidate: offset: %d , counter delta: %d",i,counter_diff[i-batch_start]);
+                        SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
                     }
                 }
             }

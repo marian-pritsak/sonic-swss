@@ -22,6 +22,7 @@ public:
     uint16_t GetVnetBitmap(uint32_t vni);
     sai_object_id_t GetTunnelID();
     sai_status_t CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni);
+    sai_status_t RemoveTableVhost(sai_object_id_t entry_id);
 private:
     void InitDefaultEntries();
     void doVnetRouteTunnelTask(Consumer &consumer);
@@ -49,6 +50,7 @@ private:
     map<std::string, IpAddress> tunnel_ip_map;
     bool getVhostEntry(std::string key, sai_object_id_t &entry_id);
     void setVhostEntry(std::string key, sai_object_id_t entry_id);
+    bool removeVhostEntry(sai_object_id_t entry_id);
     bool getTunnelIP(std::string key, IpAddress &IP);
     void setTunnelIP(std::string key, IpAddress IP);
 };
