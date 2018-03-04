@@ -16,6 +16,7 @@ extern "C" {
 #include <set>
 #include <mutex>
 #include <thread>
+#include <pcap.h>
 #include "bmt_orch_constants.h"
 #include "bmt_common.h"
 #include "bmt_cache_inserter.h"
@@ -83,51 +84,8 @@ sai_object_id_t hostif_table_entryOid;
 sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
 extern bool gScanDpdkPort;
-extern bool gFlashCache;
+extern bool gFlushCache;
 extern bool gExitFlag;
-
-sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
-//--------------------------------------
-// netdev encap via ip4 packet: so vxlan is shifted:
-// L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
-    SWSS_LOG_ERROR("[inserter] [recv] parsing packet");
-    pkt->valid = false;
-    uint16_t etherType[2];
-    uint8_t vxlan_flags;
-    uint8_t inner_ipv4_ver;
-    uint8_t outer_ipv4_ver;
-    if (buffer_size >= 84){ // TODO should be 84
-        etherType[0]   = (uint16_t)(((uint16_t)buf[12]<<8)|(uint16_t)buf[13]); // outer L2 etherType (tagged)
-        outer_ipv4_ver = (uint8_t)(buf[14]>>4);
-        vxlan_flags    = (uint8_t) buf[42]; // inner L2 etherType
-        etherType[1]   = (uint16_t)(((int)buf[62]<<8)|(int)buf[63]); // inner etherType
-        inner_ipv4_ver = (uint8_t)(buf[64]>>4);      
-        if(
-            etherType[0]    == TYPE_IPV4 &&
-            etherType[1]    == TYPE_IPV4 &&
-            vxlan_flags     == 8         &&
-            outer_ipv4_ver  == 4         &&
-            inner_ipv4_ver  == 4
-        )
-        {
-            pkt->valid = true;
-            pkt->vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
-            pkt->underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
-            pkt->overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
-            SWSS_LOG_ERROR("[inserter] [recv] packet parsed successfully:");
-            SWSS_LOG_ERROR("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
-            SWSS_LOG_ERROR("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]));
-            SWSS_LOG_ERROR("[inserter] [recv]    vni= %d",int(pkt->vni));
-        }
-        else {
-            SWSS_LOG_ERROR("[inserter] [recv] not vxlan packet");
-        }
-    }
-    else {
-            SWSS_LOG_ERROR("[inserter] [recv] short packet");
-    }
-    return SAI_STATUS_SUCCESS;
-}
 
 sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
     if (vhost_table.used_entries > (VHOST_TABLE_SIZE-2)){
@@ -152,20 +110,14 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
 
 }
 
-sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
-    // TODO implement
-    *port_vect = (uint16_t) 0xfff;
-    return SAI_STATUS_SUCCESS;
-}
-
 sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underlay_dip, uint32_t vni){
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     uint32_t offset;
     sai_status_t status = bmt_get_free_offset(&offset);
 
-    SWSS_LOG_NOTICE("Vhost Enry creation. underlay dip 0x%x (0x%x). overlay_dip 0x%x. vni %d", underlay_dip, IpAddress(underlay_dip).getIp().ip_addr.ipv4_addr, overlay_dip, vni);
+    SWSS_LOG_NOTICE("Vhost Enry creation. underlay dip 0x%x overlay_dip 0x%x. vni %d", underlay_dip, overlay_dip, vni);
     sai_object_id_t entry_id;
-    status = gBmToRCacheOrch->CreateVhostEntry(&entry_id, IpAddress(underlay_dip), IpAddress(overlay_dip), vni);
+    status = gBmToRCacheOrch->CreateVhostEntry(&entry_id, IpAddress(htonl(underlay_dip)), IpAddress(htonl(overlay_dip)), vni);
     if (status != SAI_STATUS_SUCCESS){
         SWSS_LOG_ERROR("[inserter] ERROR: failed to insert vhost rule, rv: %u", status);
         return status;
@@ -178,33 +130,88 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
     return SAI_STATUS_SUCCESS;
 }
 
-/* receive flow */
-int bmt_recv(int sockfd){
-    SWSS_LOG_ENTER();
-    uint8_t buf[BUF_SIZE];
-    ssize_t buffer_size;
-    sai_status_t status;
-    bmt_dpdk_pkt_t pkt;
-
-    while(gScanDpdkPort)
-    { 
-        SWSS_LOG_NOTICE("[inserter] listening ...");
-        buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-        SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
-        status = bmt_parse_packet(buf, buffer_size,&pkt);
-        if (status != SAI_STATUS_SUCCESS){
-            SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
-            continue;
+// sai_status_t bmt_parse_packet(uint8_t* buf, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
+void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *buf) {
+//--------------------------------------
+// netdev encap via ip4 packet: so vxlan is shifted:
+// L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
+    sai_size_t buffer_size = header->len;
+    SWSS_LOG_ERROR("[inserter] [recv] parsing packet of len %d", header->len);
+    // pkt->valid = false;
+    uint16_t etherType[2];
+    uint8_t vxlan_flags;
+    uint8_t inner_ipv4_ver;
+    uint8_t outer_ipv4_ver;
+    uint32_t vni;
+    uint32_t underlay_dip;
+    uint32_t overlay_dip;
+    if (buffer_size >= 84){ // TODO should be 84
+        etherType[0]   = (uint16_t)(((uint16_t)buf[12]<<8)|(uint16_t)buf[13]); // outer L2 etherType (tagged)
+        outer_ipv4_ver = (uint8_t)(buf[14]>>4);
+        vxlan_flags    = (uint8_t) buf[42]; // inner L2 etherType
+        etherType[1]   = (uint16_t)(((int)buf[62]<<8)|(int)buf[63]); // inner etherType
+        inner_ipv4_ver = (uint8_t)(buf[64]>>4);      
+        if(
+            etherType[0]    == TYPE_IPV4 &&
+            etherType[1]    == TYPE_IPV4 &&
+            vxlan_flags     == 8         &&
+            outer_ipv4_ver  == 4         &&
+            inner_ipv4_ver  == 4
+        )
+        {
+            // pkt->valid = true;
+            vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
+            underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
+            overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
+            SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:");
+            SWSS_LOG_NOTICE("[inserter] [recv]    underlay ip=%d.%d.%d.%d",int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
+            SWSS_LOG_NOTICE("[inserter] [recv]    overlay  ip=%d.%d.%d.%d",int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]));
+            SWSS_LOG_NOTICE("[inserter] [recv]    vni= %d",int(vni));
+            sai_status_t status = bmt_cache_insert_vhost_entry(overlay_dip, underlay_dip, vni);
+            SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %d",status);
         }
-        if (!pkt.valid) continue;
-        sleep(1); // TODO remove!!!
-        status = bmt_cache_insert_vhost_entry(pkt.overlay_dip, pkt.underlay_dip, pkt.vni);
-        if (status != SAI_STATUS_SUCCESS) 
-            continue;
+        else {
+            SWSS_LOG_NOTICE("[inserter] [recv] not vxlan packet");
+        }
     }
-    SWSS_LOG_NOTICE("[inserter] INFO: killing process.");
-    return 0;
+    else {
+            SWSS_LOG_NOTICE("[inserter] [recv] short packet");
+    }
 }
+
+sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
+    // TODO implement
+    *port_vect = (uint16_t) 0xfff;
+    return SAI_STATUS_SUCCESS;
+}
+
+/* receive flow */
+// int bmt_recv(int sockfd){
+//     SWSS_LOG_ENTER();
+//     uint8_t buf[BUF_SIZE];
+//     ssize_t buffer_size;
+//     sai_status_t status;
+//     bmt_dpdk_pkt_t pkt;
+
+//     while(gScanDpdkPort)
+//     { 
+//         SWSS_LOG_NOTICE("[inserter] listening ...");
+//         buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+//         SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
+//         status = bmt_parse_packet(buf, buffer_size,&pkt);
+//         if (status != SAI_STATUS_SUCCESS){
+//             SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
+//             continue;
+//         }
+//         if (!pkt.valid) continue;
+//         sleep(1); // TODO remove!!!
+//         // status = bmt_cache_insert_vhost_entry(pkt.overlay_dip, pkt.underlay_dip, pkt.vni);
+//         if (status != SAI_STATUS_SUCCESS) 
+//             continue;
+//     }
+//     SWSS_LOG_NOTICE("[inserter] INFO: killing process.");
+//     return 0;
+// }
 
 int bmt_init_dpdk_traffic_sampler(){
     //lock_guard<mutex> guard(cout_mutex);
@@ -422,65 +429,78 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
 //     // SWSS_LOG_NOTICE("TODO implement");
 // }
 
-int create_sampler_socket(int* sockfd_p){
-    int sockopt;
-    struct ifreq ifopts;    /* set promiscuous mode */
-    char ifName[IFNAMSIZ];
+// int create_sampler_socket(int* sockfd_p){
+//     int sockopt;
+//     struct ifreq ifopts;    /* set promiscuous mode */
+//     char ifName[IFNAMSIZ];
     
-    /* Get interface name */
-    strcpy(ifName, DEFAULT_IF);
+//     /* Get interface name */
+//     strcpy(ifName, DEFAULT_IF);
 
-    /* Open PF_PACKET socket, listening for EtherType ETHER_TYPE */
-    if ((*sockfd_p = socket(PF_PACKET, SOCK_RAW, htons(ETHER_TYPE))) == -1) {
-        perror("listener: socket"); 
-        return(SAI_STATUS_FAILURE);
-    }
+//     /* Open PF_PACKET socket, listening for EtherType ETHER_TYPE */
+//     // if ((*sockfd_p = socket(PF_PACKET, SOCK_RAW, htons(ETHER_TYPE))) == -1) {
+//     if ((*sockfd_p = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+//         perror("listener: socket"); 
+//         return(SAI_STATUS_FAILURE);
+//     }
 
-    /* Set interface to promiscuous mode - do we need to do this every time? */
-    strncpy(ifopts.ifr_name, ifName, IFNAMSIZ-1);
-    ioctl(*sockfd_p, SIOCGIFFLAGS, &ifopts);
-    ifopts.ifr_flags |= IFF_PROMISC;
-    ioctl(*sockfd_p, SIOCSIFFLAGS, &ifopts);
-    /* Allow the socket to be reused - incase connection is closed prematurely */
-    if (setsockopt(*sockfd_p, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof sockopt) == -1) {
-        perror("setsockopt");
-        close(*sockfd_p);
-        return(SAI_STATUS_FAILURE);
-    }
-    /* Bind to device */
-    if (setsockopt(*sockfd_p, SOL_SOCKET, SO_BINDTODEVICE, ifName, IFNAMSIZ-1) == -1)  {
-        perror("SO_BINDTODEVICE");
-        close(*sockfd_p);
-        return(SAI_STATUS_FAILURE);
-    }
-    return (SAI_STATUS_SUCCESS);
-}
+//     /* Set interface to promiscuous mode - do we need to do this every time? */
+//     strncpy(ifopts.ifr_name, ifName, IFNAMSIZ-1);
+//     ioctl(*sockfd_p, SIOCGIFFLAGS, &ifopts);
+//     ifopts.ifr_flags |= IFF_PROMISC;
+//     ioctl(*sockfd_p, SIOCSIFFLAGS, &ifopts);
+//     /* Allow the socket to be reused - incase connection is closed prematurely */
+//     if (setsockopt(*sockfd_p, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof sockopt) == -1) {
+//         perror("setsockopt");
+//         close(*sockfd_p);
+//         return(SAI_STATUS_FAILURE);
+//     }
+//     /* Bind to device */
+//     if (setsockopt(*sockfd_p, SOL_SOCKET, SO_BINDTODEVICE, ifName, IFNAMSIZ-1) == -1)  {
+//         perror("SO_BINDTODEVICE");
+//         close(*sockfd_p);
+//         return(SAI_STATUS_FAILURE);
+//     }
+//     return (SAI_STATUS_SUCCESS);
+// }
+
+// void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
+    // SWSS_LOG_NOTICE("packet recievd, of len %d", header->len);
+// }
 
 /* main */
 int bmt_cache_inserter(void)
 {
-    int sockfd;
+    // int sockfd;
     // we wait untill swss finish init - (runing async)
 	sleep(60);
     /* get dpdk port */
-    SWSS_LOG_ERROR("[inserter] DEBUG: initialization started.");
+    SWSS_LOG_NOTICE("[inserter] DEBUG: initialization started.");
     dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT); // TODO - take from bmtorcache
 
-    SWSS_LOG_ERROR("[inserter] DEBUG: found dpdk port.");
+    SWSS_LOG_NOTICE("[inserter] DEBUG: found dpdk port.");
     /* init dpdk port trapping via acl*/
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
-    SWSS_LOG_ERROR("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
+    SWSS_LOG_NOTICE("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
     if (sampler_init_status==0) { // only on init success    
-        int socket_status = create_sampler_socket(&sockfd);
-        SWSS_LOG_ERROR("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
-        if (socket_status==SAI_STATUS_SUCCESS) { // only on init success
+        // int socket_status = create_sampler_socket(&sockfd);
+        // SWSS_LOG_NOTICE("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
+        // if (socket_status==SAI_STATUS_SUCCESS) { // only on init success
         /* listen to traffic on dpdk port */
-            bmt_recv(sockfd); 
+            // bmt_recv(sockfd); 
+        // }
+        pcap_t *handle;         /* Session handle */
+        char errbuf[PCAP_ERRBUF_SIZE];  /* Error string */
+        handle = pcap_open_live(DEFAULT_IF, BUFSIZ, 1, 1000, errbuf);
+        if (handle == NULL) {
+            fprintf(stderr, "Couldn't open device %s: %s\n", DEFAULT_IF, errbuf);
+            return(2);
         }
-        close(sockfd);
+        pcap_loop(handle, 0, bmt_parse_packet, NULL);
+        // close(sockfd);
     }
     /* deinit dpdk port trapping via acl*/
-    SWSS_LOG_ERROR("[inserter] DEBUG: dpdk listening done, deiniting:"); 
+    SWSS_LOG_NOTICE("[inserter] DEBUG: dpdk listening done, deiniting:"); 
     int rc = bmt_deinit_dpdk_traffic_sampler(sampler_init_status);
     return(rc);
 
@@ -495,12 +515,12 @@ void bmt_cache_remove_rule(vector<bmt_rule_evac_candidate_t>* evac_candidates){
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     uint32_t offset = (evac_candidates->back()).offset;
     evac_candidates->pop_back();
-    SWSS_LOG_ERROR( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
+    SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
     gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
     vhost_table.free_offsets.push_back(offset);
 }
 
-void bmt_flash_cache(){
+void bmt_flush_cache(){
     // TODO - protect from removal of non existing entry?
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     for (uint32_t i=0 ; i<vhost_table.used_entries ; i++){
@@ -508,7 +528,7 @@ void bmt_flash_cache(){
     }
     vhost_table.used_entries = 0;
     vhost_table.free_offsets.clear();
-    gFlashCache = false;
+    gFlushCache = false;
 }
 
 void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
@@ -527,7 +547,7 @@ void bmt_cache_evacuator(){
     uint32_t batch_start;
     uint32_t batch_end = 0;
     while (!gExitFlag){
-        if (gFlashCache) bmt_flash_cache();
+        if (gFlushCache) bmt_flush_cache();
         if ( vhost_table.used_entries > (VHOST_TABLE_SIZE-2 )){ // 1 is default, 1 is to start before table is full
             if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
                  (evac_candidates.size() > 0) )

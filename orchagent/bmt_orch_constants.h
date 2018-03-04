@@ -5,7 +5,7 @@
 
 /* Constants */
 #define DPDK_FRONT_PORT 7
-#define PACKETS_PER_SAMPLE 1 // ratio of dpdk packets to samples generated
+#define PACKETS_PER_SAMPLE 10 // ratio of dpdk packets to samples generated
 #define VHOST_TABLE_SIZE 10 // TODO
 #define UNREFERENCED_PARAMETER(P)       (P)
 #define DEFAULT_IF	"Ethernet24" // sampler socket
