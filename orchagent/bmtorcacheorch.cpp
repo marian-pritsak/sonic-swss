@@ -558,6 +558,13 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
   }
 }
 
+string BmToRCacheOrch::getDPDKPortIF() {
+  Port port;
+  if (gPortsOrch->getPort(dpdk_port, port)) 
+    return port.m_alias;
+  return "";
+}
+
 sai_object_id_t BmToRCacheOrch::getDPDKPort() {
   return dpdk_port;
 }

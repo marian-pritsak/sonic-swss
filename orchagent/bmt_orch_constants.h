@@ -7,7 +7,6 @@
 #define PACKETS_PER_SAMPLE 10 // ratio of dpdk packets to samples generated
 #define VHOST_TABLE_SIZE 3 // TODO
 #define UNREFERENCED_PARAMETER(P)       (P)
-#define DEFAULT_IF	"Ethernet24" // sampler socket
 #define BUF_SIZE		1024 // sampler buffer size
 #define CONTROL_MTU 1100 //TODO
 #define ETHER_TYPE	0x0800

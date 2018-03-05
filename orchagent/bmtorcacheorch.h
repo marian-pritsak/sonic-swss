@@ -19,6 +19,7 @@ class BmToRCacheOrch : public Orch
 public:
     BmToRCacheOrch(DBConnector *db, vector<string> tableNames);
     sai_object_id_t getDPDKPort();
+    string getDPDKPortIF();
     uint16_t GetVnetBitmap(uint32_t vni);
     sai_object_id_t GetTunnelID();
     sai_status_t CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni);

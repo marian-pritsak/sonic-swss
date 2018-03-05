@@ -497,17 +497,12 @@ int bmt_cache_inserter(void)
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
     SWSS_LOG_NOTICE("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
     if (sampler_init_status==0) { // only on init success    
-        // int socket_status = create_sampler_socket(&sockfd);
-        // SWSS_LOG_NOTICE("[inserter] DEBUG: samlper socket created. status: %d", socket_status);
-        // if (socket_status==SAI_STATUS_SUCCESS) { // only on init success
-        /* listen to traffic on dpdk port */
-            // bmt_recv(sockfd); 
-        // }
         pcap_t *handle;         /* Session handle */
         char errbuf[PCAP_ERRBUF_SIZE];  /* Error string */
-        handle = pcap_open_live(DEFAULT_IF, BUFSIZ, 1, 1000, errbuf);
+        SWSS_LOG_NOTICE("Started listening on IF %s", gBmToRCacheOrch->getDPDKPortIF().c_str());
+        handle = pcap_open_live(gBmToRCacheOrch->getDPDKPortIF().c_str(), BUFSIZ, 1, 1000, errbuf);
         if (handle == NULL) {
-            fprintf(stderr, "Couldn't open device %s: %s\n", DEFAULT_IF, errbuf);
+            SWSS_LOG_ERROR("Couldn't open device %s: %s\n", gBmToRCacheOrch->getDPDKPortIF().c_str(), errbuf);
             return(2);
         }
         pcap_loop(handle, 0, bmt_parse_packet, NULL);
