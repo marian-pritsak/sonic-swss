@@ -509,38 +509,38 @@ int bmt_cache_inserter(void)
         }
         pcap_loop(handle, 0, bmt_parse_packet, NULL);
 
-DpdkPacketMap pkt_map;
-    while(gScanDpdkPort)
-    { 
-        pkt_map.clear();
-        for (uint32_t i=0; i<INSERTER_WINDOW_SIZE ; ++i){
-            SWSS_LOG_NOTICE("[inserter] listening ...");
-            buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
-            SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
-            status = bmt_parse_packet(buf, buffer_size,&pkt);
-            if (status != SAI_STATUS_SUCCESS){
-                SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
-                continue;
-            }
-            if (!pkt.valid) continue; // TODO decrease i.
-            DpdkPacketMap;:iterator it = pkt_map.find(pkt);
-            if (it != pkt_map.end())
-                pkt_map[pkt]+=1;
-            else 
-                pkt_map[pkt]=1;
-        }
-        for(auto const &it_pkt : pkt_map) {
-            if (it_pkt.second > INSERTER_THRESH){
-                SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second);
-                sleep(1); // TODO remove!!!
-                status = bmt_cache_insert_vhost_entry(it_pkt.first.overlay_dip, it_pkt.first.underlay_dip, it_pkt.first.vni);
-                if (status != SAI_STATUS_SUCCESS) 
-                    SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
-            else
-                SWSS_LOG_NOTICE("[inserter] skipping flow insertion, was seen %d times in the window",it_pkt.second);
-            }
-        }
-    }
+// DpdkPacketMap pkt_map;
+//     while(gScanDpdkPort)
+//     { 
+//         pkt_map.clear();
+//         for (uint32_t i=0; i<INSERTER_WINDOW_SIZE ; ++i){
+//             SWSS_LOG_NOTICE("[inserter] listening ...");
+//             buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+//             SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
+//             status = bmt_parse_packet(buf, buffer_size,&pkt);
+//             if (status != SAI_STATUS_SUCCESS){
+//                 SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
+//                 continue;
+//             }
+//             if (!pkt.valid) continue; // TODO decrease i.
+//             DpdkPacketMap;:iterator it = pkt_map.find(pkt);
+//             if (it != pkt_map.end())
+//                 pkt_map[pkt]+=1;
+//             else 
+//                 pkt_map[pkt]=1;
+//         }
+//         for(auto const &it_pkt : pkt_map) {
+//             if (it_pkt.second > INSERTER_THRESH){
+//                 SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second);
+//                 sleep(1); // TODO remove!!!
+//                 status = bmt_cache_insert_vhost_entry(it_pkt.first.overlay_dip, it_pkt.first.underlay_dip, it_pkt.first.vni);
+//                 if (status != SAI_STATUS_SUCCESS) 
+//                     SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
+//             else
+//                 SWSS_LOG_NOTICE("[inserter] skipping flow insertion, was seen %d times in the window",it_pkt.second);
+//             }
+//         }
+//     }
 
         // close(sockfd);
     }
