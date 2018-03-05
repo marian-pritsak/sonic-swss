@@ -376,8 +376,9 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) { //TODO - insert
 }
 
 sai_status_t BmToRCacheOrch::RemoveTableVhost(sai_object_id_t entry_id) {
-
+  SWSS_LOG_ENTER();
   sai_status_t status = sai_bmtor_api->remove_table_vhost_entry(entry_id);
+  SWSS_LOG_NOTICE("removed table vhost entry status = %d", status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
   if (removeVhostEntry(entry_id)) {

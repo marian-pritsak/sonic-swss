@@ -100,7 +100,7 @@ extern bool gFlushCache;
 extern bool gExitFlag;
 
 sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
-    if (vhost_table.used_entries > (VHOST_TABLE_SIZE-2)){
+    if (vhost_table.used_entries > (VHOST_TABLE_SIZE-1)){
         //TODO take from free list when cache evac is working.
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
@@ -114,7 +114,7 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         }
     }
     else{
-        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-2);
+        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -126,7 +126,8 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     uint32_t offset;
     sai_status_t status = bmt_get_free_offset(&offset);
-
+    if (status != SAI_STATUS_SUCCESS) 
+        return status;
     SWSS_LOG_NOTICE("Vhost Enry creation. underlay dip 0x%x overlay_dip 0x%x. vni %d", underlay_dip, overlay_dip, vni);
     sai_object_id_t entry_id;
     status = gBmToRCacheOrch->CreateVhostEntry(&entry_id, IpAddress(htonl(underlay_dip)), IpAddress(htonl(overlay_dip)), vni);
@@ -149,7 +150,7 @@ void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_ch
 // netdev encap via ip4 packet: so vxlan is shifted:
 // L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
     sai_size_t buffer_size = header->len;
-    SWSS_LOG_ERROR("[inserter] [recv] parsing packet of len %d", header->len);
+    SWSS_LOG_NOTICE("[inserter] [recv] parsing packet of len %d", header->len);
     // pkt->valid = false;
     uint16_t etherType[2];
     uint8_t vxlan_flags;
@@ -561,9 +562,8 @@ void bmt_cache_remove_rule(uint32_t offset){
     sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
     if (status == SAI_STATUS_SUCCESS) {
         vhost_table.entry[offset].valid = false;
+        vhost_table.free_offsets.push_back(offset);
     }
-
-    vhost_table.free_offsets.push_back(offset);
 }
 
 void bmt_flush_cache(){
@@ -599,14 +599,16 @@ void bmt_cache_evacuator(){
     uint32_t batch_end = 0;
     while (!gExitFlag){
         if (gFlushCache) bmt_flush_cache();
-        if (vhost_table.used_entries >= (VHOST_TABLE_SIZE-2 )) { // 1 is default, 1 is to start before table is full
-            if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
-                 (evac_candidates.size() > 0) )
-            {
+        // if (vhost_table.used_entries >= (VHOST_TABLE_SIZE-2 )) { // 1 is default, 1 is to start before table is full
+            // if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
+        if (vhost_table.used_entries - vhost_table.free_offsets.size() >= (VHOST_TABLE_SIZE - CACHE_EVAC_SIZE)) {
+
+            if (evac_candidates.size() > 0) {
                 uint32_t offset = evac_candidates.back();
                 evac_candidates.pop_back();
                 bmt_cache_remove_rule(offset);
             }
+
             // TODO ADAPTIVE treshold
             if (evac_candidates.size() < CACHE_EVAC_SIZE) {
                 batch_start = batch_end; 
@@ -631,6 +633,8 @@ void bmt_cache_evacuator(){
             } else {
                 sleep(1);
             }
+        } else {
+            usleep(100000);
         }
     }
 }

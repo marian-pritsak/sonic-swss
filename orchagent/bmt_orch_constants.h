@@ -5,7 +5,7 @@
 
 /* Constants */
 #define PACKETS_PER_SAMPLE 10 // ratio of dpdk packets to samples generated
-#define VHOST_TABLE_SIZE 3 // TODO
+#define VHOST_TABLE_SIZE 3 // Size allowed for dynamicly populated cache entries (not including local routes and dpdk default)
 #define UNREFERENCED_PARAMETER(P)       (P)
 #define BUF_SIZE		1024 // sampler buffer size
 #define CONTROL_MTU 1100 //TODO
@@ -14,7 +14,7 @@
 #define TYPE_IPV4 0x0800
 #define CACHE_EVAC_SIZE (1) // the number of expected elements in vhost_table.free_offsets
 #define EVAC_BATCH_SIZE (1) // number of counters to probe each time
-#define EVAC_TRESH (1*EVAC_BATCH_SIZE) // maximal counter value for evacuation
+#define EVAC_TRESH (10*EVAC_BATCH_SIZE) // maximal counter value for evacuation
 #define INSERTER_WINDOW_SIZE 20
 #define INSERTER_THRESH 4 // minimal number of packet from flow in a sampling window for cache insertion
 #endif /** __BMT_ORCH_CONSTANTS_H_ */
