@@ -33,9 +33,9 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
     gTunnelId = SAI_NULL_OBJECT_ID;
     gVnetBitmap = 0xfff;
     gVhostTableSize = 256;
-    dpdk_port = sai_get_port_id_by_front_port(7); // TODO - argument?
-    port_10_oid = sai_get_port_id_by_front_port(10); // TODO - why does vxlan tunnel need this as overlay interfacce?
-    SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet36:0x%lx", dpdk_port, port_10_oid);
+    dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument?
+    bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce?
+    SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid);
 }
 
 sai_object_id_t BmToRCacheOrch::create_vlan(uint16_t vid) { //TODO: change to portsorch
@@ -86,7 +86,7 @@ void BmToRCacheOrch::InitDefaultEntries() {
   table_peer_attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
   table_peer_attr[0].value.s32 = SAI_TABLE_PEERING_ENTRY_ACTION_SET_VNET_BITMAP;
   table_peer_attr[1].id = SAI_TABLE_PEERING_ENTRY_ATTR_SRC_PORT;
-  table_peer_attr[1].value.oid = port_10_oid;
+  table_peer_attr[1].value.oid = bm_port_oid;
   table_peer_attr[2].id = SAI_TABLE_PEERING_ENTRY_ATTR_META_REG;
   table_peer_attr[2].value.u16 = vnet_bitmap;
   status = sai_bmtor_api->create_table_peering_entry(&peering_entry, gSwitchId, 3, table_peer_attr);
@@ -179,7 +179,7 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
   tunnel_attr[1].id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
   tunnel_attr[1].value.oid = gUnderlayIfId;
   tunnel_attr[2].id = SAI_TUNNEL_ATTR_OVERLAY_INTERFACE;
-  tunnel_attr[2].value.oid = port_10_oid;
+  tunnel_attr[2].value.oid = bm_port_oid;
   tunnel_attr[3].id = SAI_TUNNEL_ATTR_DECAP_ECN_MODE;
   tunnel_attr[3].value.s32 = SAI_TUNNEL_DECAP_ECN_MODE_USER_DEFINED;
   tunnel_attr[4].id = SAI_TUNNEL_ATTR_DECAP_MAPPERS;

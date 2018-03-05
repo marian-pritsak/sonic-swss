@@ -68,6 +68,7 @@ struct bmt_dpdk_pkt_compare_t {
 };
 
 typedef struct bmt_vhost_entry_t { //TODDO - change to map<offset:entry_id>?
+    bool valid;
     sai_object_id_t entry_id;
     uint32_t overlay_dip;
     uint32_t underlay_dip;
@@ -489,9 +490,9 @@ int bmt_cache_inserter(void)
 	sleep(60);
     /* get dpdk port */
     SWSS_LOG_NOTICE("[inserter] DEBUG: initialization started.");
-    dpdk_port = sai_get_port_id_by_front_port((uint32_t) DPDK_FRONT_PORT); // TODO - take from bmtorcache
+    dpdk_port = gBmToRCacheOrch->getDPDKPort();
 
-    SWSS_LOG_NOTICE("[inserter] DEBUG: found dpdk port.");
+    SWSS_LOG_NOTICE("[inserter] DEBUG: found dpdk port (0x%lx).", dpdk_port);
     /* init dpdk port trapping via acl*/
     int sampler_init_status = bmt_init_dpdk_traffic_sampler();
     SWSS_LOG_NOTICE("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
