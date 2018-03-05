@@ -113,7 +113,7 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         }
     }
     else{
-        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
+        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-2);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -138,6 +138,7 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
     vhost_table.entry[offset].underlay_dip = underlay_dip;
     vhost_table.entry[offset].vni = vni;
     vhost_table.entry[offset].entry_id = entry_id;
+    vhost_table.entry[offset].valid = true;
     return SAI_STATUS_SUCCESS;
 }
 
@@ -484,6 +485,7 @@ int bmt_cache_inserter(void)
 {
     // int sockfd;
     // we wait untill swss finish init - (runing async)
+    SWSS_LOG_ENTER();
 	sleep(60);
     /* get dpdk port */
     SWSS_LOG_NOTICE("[inserter] DEBUG: initialization started.");
@@ -556,12 +558,15 @@ typedef struct _bmt_rule_evac_candidate_t{
     uint64_t read;
 } bmt_rule_evac_candidate_t;
 
-void bmt_cache_remove_rule(vector<bmt_rule_evac_candidate_t>* evac_candidates){
+void bmt_cache_remove_rule(uint32_t offset){
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-    uint32_t offset = (evac_candidates->back()).offset;
-    evac_candidates->pop_back();
+    
     SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
-    gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
+    sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
+    if (status == SAI_STATUS_SUCCESS) {
+        vhost_table.entry[offset].valid = false;
+    }
+
     vhost_table.free_offsets.push_back(offset);
 }
 
@@ -569,7 +574,9 @@ void bmt_flush_cache(){
     // TODO - protect from removal of non existing entry?
     lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     for (uint32_t i=0 ; i<vhost_table.used_entries ; i++){
-        sai_bmtor_api->remove_table_vhost_entry(vhost_table.entry[i].entry_id);
+        if (vhost_table.entry[i].valid) {
+            bmt_cache_remove_rule(i);
+        }
     }
     vhost_table.used_entries = 0;
     vhost_table.free_offsets.clear();
@@ -578,6 +585,9 @@ void bmt_flush_cache(){
 
 void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
   sai_bmtor_stat_t counter_id = SAI_BMTOR_STAT_TABLE_VHOST_HIT_OCTETS;
+  *counter = 0;
+  if (!vhost_table.entry[offset].valid) 
+    return;
   SWSS_LOG_NOTICE("reading vhost counter in offset %d", offset);
   sai_status_t status = sai_bmtor_api->get_bmtor_stats(vhost_table.entry[offset].entry_id, 1, &counter_id, counter);
   if (status)
@@ -585,31 +595,31 @@ void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
 }
 
 void bmt_cache_evacuator(){
-    vector<bmt_rule_evac_candidate_t> evac_candidates;
+    SWSS_LOG_ENTER();
+    vector<uint32_t> evac_candidates;
     uint64_t counter_values[EVAC_BATCH_SIZE];
     uint64_t counter_diff[EVAC_BATCH_SIZE];
-    bmt_rule_evac_candidate_t evac_candidate;
     uint32_t batch_start;
     uint32_t batch_end = 0;
     while (!gExitFlag){
         if (gFlushCache) bmt_flush_cache();
-        if ( vhost_table.used_entries > (VHOST_TABLE_SIZE-2 )){ // 1 is default, 1 is to start before table is full
+        if (vhost_table.used_entries >= (VHOST_TABLE_SIZE-2 )) { // 1 is default, 1 is to start before table is full
             if ( (vhost_table.free_offsets.size() < CACHE_EVAC_SIZE) && 
                  (evac_candidates.size() > 0) )
             {
-                bmt_cache_remove_rule(&evac_candidates);
+                uint32_t offset = evac_candidates.back();
+                evac_candidates.pop_back();
+                bmt_cache_remove_rule(offset);
             }
-                // TODO ADAPTIVE treshold
-            if (evac_candidates.size() < CACHE_EVAC_SIZE)
-            {
+            // TODO ADAPTIVE treshold
+            if (evac_candidates.size() < CACHE_EVAC_SIZE) {
                 batch_start = batch_end; 
                 batch_end = (batch_start + EVAC_BATCH_SIZE)%VHOST_TABLE_SIZE;
                 // seperate loops for constant read interval time.
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
                     counter_read_by_offset(i, &counter_values[i-batch_start]);
-
                 }
-                sleep(1);
+                usleep(50000);
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
                     counter_read_by_offset(i, &counter_diff[i-batch_start]);
                     // TODO - maybe devide by time interval to normalize.
@@ -617,13 +627,13 @@ void bmt_cache_evacuator(){
                 }
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
                     SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
-                    if (counter_diff[i-batch_start] < EVAC_TRESH){
-                        evac_candidate.offset = i;
-                        evac_candidate.read = counter_diff[i-batch_start];
-                        evac_candidates.push_back(evac_candidate);
+                    if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < EVAC_TRESH)){
+                        evac_candidates.push_back(i);
                         SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
                     }
                 }
+            } else {
+                sleep(1);
             }
         }
     }
