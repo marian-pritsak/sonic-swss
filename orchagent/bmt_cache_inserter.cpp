@@ -14,6 +14,7 @@ extern "C" {
 #include <signal.h>
 #include <vector>
 #include <set>
+#include <map>
 #include <mutex>
 #include <thread>
 #include <pcap.h>
@@ -57,6 +58,15 @@ typedef struct bmt_dpdk_pkt_t {
     uint32_t vni;
 } bmt_dpdk_pkt_t;
 
+struct bmt_dpdk_pkt_compare_t {
+    bool operator()(const bmt_dpdk_pkt_t &pkt1, const bmt_dpdk_pkt_t &pkt2) const
+    {
+      return (pkt1.underlay_dip == pkt2.underlay_dip)
+          && (pkt1.overlay_dip == pkt2.overlay_dip)
+          && (pkt1.vni == pkt2.vni);
+    }
+};
+
 typedef struct bmt_vhost_entry_t { //TODDO - change to map<offset:entry_id>?
     sai_object_id_t entry_id;
     uint32_t overlay_dip;
@@ -72,6 +82,7 @@ typedef struct bmt_vhost_table_t {
     vector<uint32_t>    free_offsets; // TODO implement cache evac
 } bmt_vhost_table_t;
 
+typedef std::map<bmt_dpdk_pkt_t,uint32_t, bmt_dpdk_pkt_compare_t> DpdkPacketMap;
 
 /* Global variables */
 extern sai_object_id_t gSwitchId;
@@ -93,16 +104,16 @@ sai_status_t bmt_get_free_offset(uint32_t* offset_ptr){
         if (vhost_table.free_offsets.size()>0){
             *offset_ptr = vhost_table.free_offsets.back();
             vhost_table.free_offsets.pop_back();
-            SWSS_LOG_ERROR("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
+            SWSS_LOG_NOTICE("[inserter] INFO: cache full, replacing chace entry: %u", *offset_ptr);
             return SAI_STATUS_SUCCESS;
         }
         else{
-            SWSS_LOG_ERROR("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
+            SWSS_LOG_NOTICE("[inserter] WARNING: no avaliable entries is cache, please check eviction.");
             return SAI_STATUS_FAILURE;
         }
     }
     else{
-        SWSS_LOG_ERROR("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
+        SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         *offset_ptr = vhost_table.used_entries;
         vhost_table.used_entries++;
         return SAI_STATUS_SUCCESS;
@@ -497,6 +508,40 @@ int bmt_cache_inserter(void)
             return(2);
         }
         pcap_loop(handle, 0, bmt_parse_packet, NULL);
+
+DpdkPacketMap pkt_map;
+    while(gScanDpdkPort)
+    { 
+        pkt_map.clear();
+        for (uint32_t i=0; i<INSERTER_WINDOW_SIZE ; ++i){
+            SWSS_LOG_NOTICE("[inserter] listening ...");
+            buffer_size = recvfrom(sockfd, buf, BUF_SIZE, 0, NULL, NULL);
+            SWSS_LOG_NOTICE("[inserter] recv packet, size = %lu",buffer_size);
+            status = bmt_parse_packet(buf, buffer_size,&pkt);
+            if (status != SAI_STATUS_SUCCESS){
+                SWSS_LOG_ERROR("[inserter] BMtor_dpdk_sampler :  bmt_parse_packet , status %d", status);
+                continue;
+            }
+            if (!pkt.valid) continue; // TODO decrease i.
+            DpdkPacketMap;:iterator it = pkt_map.find(pkt);
+            if (it != pkt_map.end())
+                pkt_map[pkt]+=1;
+            else 
+                pkt_map[pkt]=1;
+        }
+        for(auto const &it_pkt : pkt_map) {
+            if (it_pkt.second > INSERTER_THRESH){
+                SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second);
+                sleep(1); // TODO remove!!!
+                status = bmt_cache_insert_vhost_entry(it_pkt.first.overlay_dip, it_pkt.first.underlay_dip, it_pkt.first.vni);
+                if (status != SAI_STATUS_SUCCESS) 
+                    SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
+            else
+                SWSS_LOG_NOTICE("[inserter] skipping flow insertion, was seen %d times in the window",it_pkt.second);
+            }
+        }
+    }
+
         // close(sockfd);
     }
     /* deinit dpdk port trapping via acl*/
