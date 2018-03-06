@@ -9,8 +9,9 @@
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
+#include "bmt_common.h"
 
-extern sai_object_id_t gVirtualRouterId;
+extern global_config_t g;
 
 // extern sai_router_interface_api_t*  sai_router_intfs_api;
 // extern sai_route_api_t*             sai_route_api;
@@ -177,7 +178,7 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
   tunnel_attr[0].id = SAI_TUNNEL_ATTR_TYPE;
   tunnel_attr[0].value.s32 = SAI_TUNNEL_TYPE_VXLAN;
   tunnel_attr[1].id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
-  tunnel_attr[1].value.oid = gUnderlayIfId;
+  tunnel_attr[1].value.oid = g.underlayIfId;
   tunnel_attr[2].id = SAI_TUNNEL_ATTR_OVERLAY_INTERFACE;
   tunnel_attr[2].value.oid = bm_port_oid;
   tunnel_attr[3].id = SAI_TUNNEL_ATTR_DECAP_ECN_MODE;
@@ -202,7 +203,7 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
   SWSS_LOG_NOTICE("sai_tunnel_id = 0x%lx\n", gTunnelId);
   sai_attribute_t tunnel_term_table_entry_attr[5];
   tunnel_term_table_entry_attr[0].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_VR_ID;
-  tunnel_term_table_entry_attr[0].value.oid = gVirtualRouterId;
+  tunnel_term_table_entry_attr[0].value.oid = g.virtualRouterId;
   tunnel_term_table_entry_attr[1].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_TYPE;
   tunnel_term_table_entry_attr[1].value.s32 = SAI_TUNNEL_TERM_TABLE_ENTRY_TYPE_P2MP;
   tunnel_term_table_entry_attr[2].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_DST_IP;
@@ -354,7 +355,7 @@ void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) { //TODO - insert
     //     uint32_t vni = 8; //Get this from Vnet name
     //     sai_object_id_t vhost_entry;
     //     if (op == SET_COMMAND) {
-    //         SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. gSwitchId = 0x%lx", gSwitchId);
+    //         SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. switchId = 0x%lx", switchId);
     //         SWSS_LOG_NOTICE("vnet %s. enpoint %s. underlay_dip 0x%x", vnet_name.c_str(), endpoint.c_str(), htonl(underlay_dip.getIp().ip_addr.ipv4_addr));
     //         status = CreateVhostEntry(&vhost_entry, underlay_dip, overlay_dip_prefix.getIp(), vni); 
     //         if (status != SAI_STATUS_SUCCESS) {

@@ -591,7 +591,6 @@ void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
   if (status)
     *counter = 0;
 
-
   vector<FieldValueTuple> fieldValues;
   fieldValues.emplace_back("VNI", to_string(vhost_table.entry[offset].vni));
   fieldValues.emplace_back("UNDERLAY_DIP", IpPrefix(htonl(vhost_table.entry[offset].underlay_dip), 32).to_string());

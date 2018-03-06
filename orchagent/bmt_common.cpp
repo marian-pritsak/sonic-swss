@@ -195,7 +195,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   // sai_attribute_t bridge_attr[1];
   // bridge_attr[0].id = SAI_BRIDGE_ATTR_TYPE;
   // bridge_attr[0].value.s32 = SAI_BRIDGE_TYPE_1D;
-  // status = sai_bridge_api->create_bridge(&bridge_id, gSwitchId, 1, bridge_attr);
+  // status = sai_bridge_api->create_bridge(&bridge_id, switchId, 1, bridge_attr);
   // printf("create_bridge. status = %d\n", status);
   // if (status != SAI_STATUS_SUCCESS)
   // {
@@ -349,7 +349,7 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   tunnel_map_entry_attr[2].value.u32 = vni;
   tunnel_map_entry_attr[3].id = SAI_TUNNEL_MAP_ENTRY_ATTR_VLAN_ID_VALUE;
   tunnel_map_entry_attr[3].value.u16 = vid;
-  // status = sai_tunnel_api->create_tunnel_map_entry(&tunnel_decap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
+  // status = sai_tunnel_api->create_tunnel_map_entry(&tunnel_decap_map_entry, switchId, 4, tunnel_map_entry_attr);
   // printf("create_tunnel_map_entry (decap). status = %d\n", status);
   // if (status != SAI_STATUS_SUCCESS)
   // {
