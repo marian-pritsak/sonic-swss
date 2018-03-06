@@ -28,7 +28,7 @@ extern "C" {
 #include <string.h>
 #include "portsorch.h"
 #include "ipprefix.h"
-
+#include "saiserialize.h"
 
 #include <linux/if_packet.h>
 #include <string.h>
@@ -40,6 +40,8 @@ extern "C" {
 #include <ctime>
 #include <cstdlib>
 #include "bmt_common.h"
+
+#define WRITE_COUNTERS_TO_DB
 
 extern global_config_t g;
 
@@ -577,7 +579,7 @@ void bmt_flush_cache(){
     g.cacheRemoveCount = 0;
 }
 
-void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
+void counter_read_by_offset(uint32_t offset, uint64_t *counter,shared_ptr<Table> countersTable) {
   sai_bmtor_stat_t counter_id = SAI_BMTOR_STAT_TABLE_VHOST_HIT_OCTETS;
   *counter = 0;
   if (!vhost_table.entry[offset].valid) 
@@ -586,6 +588,17 @@ void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
   sai_status_t status = sai_bmtor_api->get_bmtor_stats(vhost_table.entry[offset].entry_id, 1, &counter_id, counter);
   if (status)
     *counter = 0;
+#ifdef WRITE_COUNTERS_TO_DB
+  vector<FieldValueTuple> fieldValues;
+  fieldValues.emplace_back("VNI", to_string(vhost_table.entry[offset].vni));
+  fieldValues.emplace_back("UNDERLAY_DIP", IpPrefix(vhost_table.entry[offset].underlay_dip, 32).to_string());
+  fieldValues.emplace_back("OVERLAY_DIP", IpPrefix(vhost_table.entry[offset].overlay_dip, 32).to_string());
+  fieldValues.emplace_back("BYTES", to_string(*counter));
+
+  countersTable->set(sai_serialize_object_id(vhost_table.entry[offset].entry_id), fieldValues);
+  SWSS_LOG_NOTICE("write counters to DB key 0x%lx", vhost_table.entry[offset].entry_id);
+  //
+#endif
 }
 
 void bmt_cache_evacuator(){
@@ -595,6 +608,8 @@ void bmt_cache_evacuator(){
     uint64_t counter_diff[EVAC_BATCH_SIZE];
     uint32_t batch_start;
     uint32_t batch_end = 0;
+    auto countersDb = make_shared<DBConnector>(DBConnector(COUNTERS_DB, DBConnector::DEFAULT_UNIXSOCKET, 0));
+    auto countersTable = make_shared<Table>(Table(countersDb.get(), "BMTOR"));
     while (!g.exitFlag) {
         if (g.flushCache) {
             bmt_flush_cache();
@@ -619,11 +634,11 @@ void bmt_cache_evacuator(){
                 batch_end = min(batch_start + EVAC_BATCH_SIZE, (uint32_t) VHOST_TABLE_SIZE);
                 // seperate loops for constant read interval time.
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
-                    counter_read_by_offset(i, &counter_values[i-batch_start]);
+                    counter_read_by_offset(i, &counter_values[i-batch_start], countersTable);
                 }
                 usleep(100000);
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
-                    counter_read_by_offset(i, &counter_diff[i-batch_start]);
+                    counter_read_by_offset(i, &counter_diff[i-batch_start], countersTable);
                     // TODO - maybe devide by time interval to normalize.
                     counter_diff[i-batch_start] -= counter_values[i-batch_start];
                 }
@@ -650,4 +665,4 @@ void bmt_cache_start() {
     t1_cache_inserter.detach();
     t2_cache_evacuator.detach();
 }
- 
+
