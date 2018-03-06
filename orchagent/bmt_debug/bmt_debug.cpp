@@ -58,6 +58,10 @@ void do_debug()
         getline( std::cin, message );
         memcpy(buf, message.c_str(), message.length()+1);
 
+        if (!message.compare("quit") || !message.compare("q") || !message.compare("exit")) {
+            exit(0);
+        }
+
         //send the message
         if (sendto(sock, buf, message.length(), 0 , (struct sockaddr*)&si_other, slen)==-1) {
             fprintf(stderr,"BMT debug error in sendto()");
