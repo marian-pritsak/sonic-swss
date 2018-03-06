@@ -49,7 +49,7 @@ void dispatch(std::string &input, global_config_t* cfg, std::ostringstream &stre
     }
     else if (!input.compare("status") || !input.compare("s")) {
         stream << "sampler init status " << cfg->sampler_init_status << std::endl;
-        stream << "inserter is " << (cfg->pauseCacheInsertion ? "running" : "paused") << std::endl;
+        stream << "inserter is " << (cfg->pauseCacheInsertion ? "paused" : "running") << std::endl;
         stream << "cacheInsertCount " << cfg->cacheInsertCount << std::endl;
         stream << "cacheInsertSkip " << cfg->cacheInsertSkip << std::endl;
         stream << "cacheRemoveCount " << cfg->cacheRemoveCount << std::endl;
