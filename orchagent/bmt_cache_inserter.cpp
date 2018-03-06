@@ -41,7 +41,7 @@ extern "C" {
 #include <cstdlib>
 #include "bmt_common.h"
 
-#define WRITE_COUNTERS_TO_DB
+#define NO_WRITE_COUNTERS_TO_DB
 
 extern global_config_t g;
 
