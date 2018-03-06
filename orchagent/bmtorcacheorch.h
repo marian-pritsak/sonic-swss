@@ -11,9 +11,6 @@
 #include <map>
 #include <set>
 
-extern sai_object_id_t gVirtualRouterId;
-extern sai_object_id_t gUnderlayIfId;
-
 class BmToRCacheOrch : public Orch
 {
 public:

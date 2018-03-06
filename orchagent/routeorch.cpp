@@ -2,8 +2,9 @@
 #include "routeorch.h"
 #include "logger.h"
 #include "swssnet.h"
+#include "bmt_common.h"
 
-extern sai_object_id_t gVirtualRouterId;
+extern global_config_t g;
 extern sai_object_id_t gSwitchId;
 
 extern sai_next_hop_group_api_t*    sai_next_hop_group_api;
@@ -58,7 +59,7 @@ RouteOrch::RouteOrch(DBConnector *db, string tableName, NeighOrch *neighOrch) :
     IpPrefix default_ip_prefix("0.0.0.0/0");
 
     sai_route_entry_t unicast_route_entry;
-    unicast_route_entry.vr_id = gVirtualRouterId;
+    unicast_route_entry.vr_id = g.virtualRouterId;
     unicast_route_entry.switch_id = gSwitchId;
     copy(unicast_route_entry.destination, default_ip_prefix);
     subnet(unicast_route_entry.destination, unicast_route_entry.destination);
@@ -646,7 +647,7 @@ bool RouteOrch::addRoute(IpPrefix ipPrefix, IpAddresses nextHops)
 
     /* Sync the route entry */
     sai_route_entry_t route_entry;
-    route_entry.vr_id = gVirtualRouterId;
+    route_entry.vr_id = g.virtualRouterId;
     route_entry.switch_id = gSwitchId;
     copy(route_entry.destination, ipPrefix);
 
@@ -737,7 +738,7 @@ bool RouteOrch::removeRoute(IpPrefix ipPrefix)
     SWSS_LOG_ENTER();
 
     sai_route_entry_t route_entry;
-    route_entry.vr_id = gVirtualRouterId;
+    route_entry.vr_id = g.virtualRouterId;
     route_entry.switch_id = gSwitchId;
     copy(route_entry.destination, ipPrefix);
 

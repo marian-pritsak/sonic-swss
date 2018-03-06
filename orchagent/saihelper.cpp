@@ -9,6 +9,7 @@ extern "C" {
 #include <sairedis.h>
 #include "timestamp.h"
 #include "saihelper.h"
+#include "bmt_common.h"
 
 using namespace std;
 using namespace swss;
@@ -41,10 +42,7 @@ sai_bmtor_api_t*            sai_bmtor_api;
 sai_samplepacket_api_t*     sai_samplepacket_api;
 
 extern sai_object_id_t gSwitchId;
-extern bool gSairedisRecord;
-extern bool gSwssRecord;
-extern ofstream gRecordOfs;
-extern string gRecordFile;
+extern global_config_t g;
 
 map<string, string> gProfileMap;
 
@@ -167,7 +165,7 @@ void initSaiRedis(const string &record_location)
 
     /* set recording dir before enable recording */
 
-    if (gSairedisRecord)
+    if (g.sairedisRecord)
     {
         attr.id = SAI_REDIS_SWITCH_ATTR_RECORDING_OUTPUT_DIR;
         attr.value.s8list.count = (uint32_t)record_location.size();
@@ -185,13 +183,13 @@ void initSaiRedis(const string &record_location)
     /* Disable/enable SAI Redis recording */
 
     attr.id = SAI_REDIS_SWITCH_ATTR_RECORD;
-    attr.value.booldata = gSairedisRecord;
+    attr.value.booldata = g.sairedisRecord;
 
     status = sai_switch_api->set_switch_attribute(gSwitchId, &attr);
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to %s SAI Redis recording, rv:%d",
-            gSairedisRecord ? "enable" : "disable", status);
+            g.sairedisRecord ? "enable" : "disable", status);
         exit(EXIT_FAILURE);
     }
 
