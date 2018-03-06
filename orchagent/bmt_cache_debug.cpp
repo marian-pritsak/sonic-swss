@@ -47,14 +47,15 @@ void dispatch(std::string &input, global_config_t* cfg, std::ostringstream &stre
         cfg->pauseCacheInsertion = false;
         stream << "Insertion resumed";
     }
-    else if (!input.compare("status")) {
+    else if (!input.compare("status") || !input.compare("s")) {
         stream << "sampler init status " << cfg->sampler_init_status << std::endl;
-        stream << "exitFlag " << cfg->exitFlag << std::endl;
-        stream << "scanDpdkPort " << cfg->scanDpdkPort << std::endl;
-        stream << "flushCache " << cfg->flushCache << std::endl;
+        stream << "inserter is " << (cfg->pauseCacheInsertion ? "running" : "paused") << std::endl;
         stream << "cacheInsertCount " << cfg->cacheInsertCount << std::endl;
         stream << "cacheInsertSkip " << cfg->cacheInsertSkip << std::endl;
         stream << "cacheRemoveCount " << cfg->cacheRemoveCount << std::endl;
+        stream << "flushCache " << cfg->flushCache << std::endl;
+        stream << "exitFlag " << cfg->exitFlag << std::endl;
+        stream << "scanDpdkPort " << cfg->scanDpdkPort << std::endl;
     }
     else {
         stream << input << "??? Try - status, flush, pause, resume, evac-stop, insert-stop";

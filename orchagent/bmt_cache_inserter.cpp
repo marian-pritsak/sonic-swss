@@ -563,7 +563,7 @@ void bmt_cache_remove_rule(uint32_t offset){
 
 void bmt_flush_cache(){
     // TODO - protect from removal of non existing entry?
-    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    // lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     for (uint32_t i=0 ; i<vhost_table.used_entries ; i++){
         if (vhost_table.entry[i].valid) {
             bmt_cache_remove_rule(i);
