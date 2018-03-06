@@ -38,7 +38,7 @@ orchagent_SOURCES = \
 		    pfcwdorch.cpp \
 		    pfcactionhandler.cpp \
 	 	    bmt_common.cpp \
-		    bmt_cache_evacuator.cpp \
+		    bmt_cache_debug.cpp \
 		    bmt_cache_inserter.cpp \
 		    bmtorcacheorch.cpp \
 		    acltable.h \
@@ -63,7 +63,7 @@ orchagent_SOURCES = \
         	    switchorch.h \
 		    swssnet.h \
 		    tunneldecaporch.h \
-		    bmt_cache_evacuator.h \
+		    bmt_cache_debug.h \
 		    bmt_cache_inserter.h \
 		    bmt_common.h \
 		    bmt_orch_constants.h \

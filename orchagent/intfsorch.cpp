@@ -9,8 +9,9 @@
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
+#include "bmt_common.h"
 
-extern sai_object_id_t gVirtualRouterId;
+extern global_config_t g;
 
 extern sai_router_interface_api_t*  sai_router_intfs_api;
 extern sai_route_api_t*             sai_route_api;
@@ -216,11 +217,11 @@ bool IntfsOrch::addRouterIntfs(Port &port)
     vector<sai_attribute_t> attrs;
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
-    attr.value.oid = gVirtualRouterId;
+    attr.value.oid = g.virtualRouterId;
     attrs.push_back(attr);
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_SRC_MAC_ADDRESS;
-    memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
+    memcpy(attr.value.mac, g.macAddress.getMac(), sizeof(sai_mac_t));
     attrs.push_back(attr);
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
@@ -306,7 +307,7 @@ void IntfsOrch::addSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = gVirtualRouterId;
+    unicast_route_entry.vr_id = g.virtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix);
     subnet(unicast_route_entry.destination, unicast_route_entry.destination);
 
@@ -338,7 +339,7 @@ void IntfsOrch::removeSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = gVirtualRouterId;
+    unicast_route_entry.vr_id = g.virtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix);
     subnet(unicast_route_entry.destination, unicast_route_entry.destination);
 
@@ -359,7 +360,7 @@ void IntfsOrch::addIp2MeRoute(const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = gVirtualRouterId;
+    unicast_route_entry.vr_id = g.virtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix.getIp());
 
     sai_attribute_t attr;
@@ -390,7 +391,7 @@ void IntfsOrch::removeIp2MeRoute(const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = gVirtualRouterId;
+    unicast_route_entry.vr_id = g.virtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix.getIp());
 
     sai_status_t status = sai_route_api->remove_route_entry(&unicast_route_entry);

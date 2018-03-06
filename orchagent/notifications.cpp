@@ -10,8 +10,9 @@ extern "C" {
 
 #include "logger.h"
 #include "notifications.h"
+#include "bmt_common.h"
 
-extern mutex gDbMutex;
+extern global_config_t g;
 extern PortsOrch *gPortsOrch;
 extern FdbOrch *gFdbOrch;
 
@@ -19,7 +20,7 @@ void on_fdb_event(uint32_t count, sai_fdb_event_notification_data_t *data)
 {
     SWSS_LOG_ENTER();
 
-    lock_guard<mutex> lock(gDbMutex);
+    lock_guard<mutex> lock(g.dbMutex);
 
     if (!gFdbOrch)
     {
@@ -48,7 +49,7 @@ void on_port_state_change(uint32_t count, sai_port_oper_status_notification_t *d
 {
     SWSS_LOG_ENTER();
 
-    lock_guard<mutex> lock(gDbMutex);
+    lock_guard<mutex> lock(g.dbMutex);
 
     if (!gPortsOrch)
     {
