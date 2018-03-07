@@ -40,7 +40,7 @@ extern "C" {
 #include <netinet/ether.h>
 #include <ctime>
 #include <cstdlib>
-#include<bits/stdc++.h>
+#include <bits/stdc++.h>
 
 using namespace std;
 extern sai_hostif_api_t *sai_hostif_api;
@@ -79,7 +79,7 @@ typedef struct bmt_vhost_entry_t { //TODDO - change to map<offset:entry_id>?
 
 
 typedef struct bmt_vhost_table_t {
-    bmt_vhost_entry_t   entry[VHOST_TABLE_SIZE];c++
+    bmt_vhost_entry_t   entry[VHOST_TABLE_SIZE];
     uint32_t            used_entries=0;
     mutex               free_offset_mutex;
     vector<uint32_t>    free_offsets; // TODO implement cache evac
@@ -102,6 +102,7 @@ bmt_vhost_table_t vhost_table;
 extern bool gScanDpdkPort;
 extern bool gFlushCache;
 extern bool gExitFlag;
+bmtCacheManager cacheManager;
 
 sai_status_t bmt_get_free_offset(uint32_t &offset){
     if (vhost_table.used_entries > (VHOST_TABLE_SIZE-1)){
@@ -113,15 +114,14 @@ sai_status_t bmt_get_free_offset(uint32_t &offset){
         }
         else
             SWSS_LOG_NOTICE("[inserter] WARNING, no free entries");
-        return SAI_STATUS_SUCCESS;
+        return SAI_STATUS_FAILURE;
     }
     else{
         SWSS_LOG_NOTICE("[inserter] INFO: cache has unused entries, using entry %u/%u", vhost_table.used_entries, VHOST_TABLE_SIZE-1);
         offset = vhost_table.used_entries;
         // vhost_table.used_entries++; // we inc only if the rule was actually inserted.
-        return SAI_STATUS_SUCCESS;
     }
-
+    return SAI_STATUS_SUCCESS;
 }
 
 sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underlay_dip, uint32_t vni){
@@ -423,7 +423,17 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
     return 0;
 }
 
-
+sai_status_t bmt_cache_remove_rule(uint32_t offset){
+    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    
+    SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
+    sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
+    if (status == SAI_STATUS_SUCCESS) {
+        vhost_table.entry[offset].valid = false;
+        vhost_table.free_offsets.push_back(offset);
+    }
+    return status;
+}
 
 typedef chrono::steady_clock::time_point bmt_time_t;
 /* inserter main */
@@ -478,6 +488,7 @@ int bmt_cache_inserter(void)
         DpdkPacketMap pkt_map;
         pkt_map.clear();
         uint64_t window_time;
+        uint32_t offset;
         while(gScanDpdkPort) { 
             pkt_map.clear();
             SWSS_LOG_NOTICE("[inserter] listening for %d packets...", INSERTER_WINDOW_SIZE);
@@ -486,20 +497,22 @@ int bmt_cache_inserter(void)
             window_time = chrono::duration_cast<std::chrono::microseconds>(chrono::steady_clock::now() - start).count();
             for(auto const &it_pkt : pkt_map) {
                 uint64_t bps = 1000000*it_pkt.second.second*PACKETS_PER_SAMPLE/window_time;
-                if (bps > bmtCacheManager.get_insertion_thresh()){
-                    SWSS_LOG_NOTICE("[inserter] flow insertion, bytes/sec %d times in the window",bps);
+                if (bps > cacheManager.get_insertion_thresh()){
+                    SWSS_LOG_NOTICE("[inserter] flow insertion, bytes/sec %lu times in the window",bps);
                     if(vhost_table.free_offsets.size()<CACHE_EVAC_SIZE){
-                        saistatus = bmtCacheManager.consume_candidate(bps, offset);
+                        saistatus = cacheManager.consume_candidate(bps, offset);
                         if (saistatus != SAI_STATUS_SUCCESS) 
-                            SWSS_LOG_ERROR("[inserter] ERROR: consume_candidate failed, bytes/sec %d.",bps);
-                        sai_status_t bmt_cache_remove_rule(uint32_t offset)
+                            SWSS_LOG_ERROR("[inserter] ERROR: consume_candidate failed, bytes/sec %lu.",bps);
+                        saistatus = bmt_cache_remove_rule(offset);
+                        if (saistatus != SAI_STATUS_SUCCESS) 
+                            SWSS_LOG_ERROR("[inserter] ERROR: cant remove rule, offset %d",offset);
                     }
                     saistatus = bmt_cache_insert_vhost_entry(it_pkt.first.second, it_pkt.second.first, it_pkt.first.first);
-                    SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %d",status);
+                    SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %u",saistatus);
                     if (saistatus != SAI_STATUS_SUCCESS) 
                         SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
                 } else {
-                    SWSS_LOG_NOTICE("[inserter] skipping flow insertion, bytes/sec %d times in the window",bps);
+                    SWSS_LOG_NOTICE("[inserter] skipping flow insertion, bytes/sec %lu times in the window",bps);
                 }
             }
         }
@@ -513,21 +526,6 @@ int bmt_cache_inserter(void)
 }
 
 typedef pair<uint64_t,uint32_t>bmt_rule_evac_candidate_t; // bps,offset
-class bmtCacheManager{
-    private: 
-        mutex cacheMutex;
-        list<bmt_rule_evac_candidate_t> evac_candidates;
-        uint64_t evac_threshold;
-        uint64_t insertion_threshold;
-    public:
-        bmtCacheManager();
-        void insert_candidate(uint64_t bps,uint32_t offset);
-        sai_status_t consume_candidate(uint64_t bps, uint32_t &offset);
-        //bmt_rule_evac_candidate_t free_candidate();
-        uint64_t get_insertion_thresh();
-        uint64_t get_eviction_thresh();
-        void print_candidates();
-};
 
 bmtCacheManager::bmtCacheManager(){
     lock_guard<mutex> guard(cacheMutex);
@@ -537,15 +535,15 @@ bmtCacheManager::bmtCacheManager(){
 }
 
 void bmtCacheManager::print_candidates(){
+    SWSS_LOG_ENTER();
     lock_guard<mutex> guard(cacheMutex);
     for (auto it=evac_candidates.begin(); it!=evac_candidates.end(); it++){
-        cout << "bps: "<< it->first<<", offset " << it->second <<endl;
+        SWSS_LOG_INFO("[print evac candidates] bps: %lu , offset: %d", it->first,it->second);
     }
 }
 /** added to candidate list the entry cosest to bps from below */
 sai_status_t bmtCacheManager::consume_candidate(uint64_t bps,uint32_t &offset){
     lock_guard<mutex> guard(cacheMutex);    
-    sai_status_t status;
     for (auto it=evac_candidates.begin(); it!=evac_candidates.end(); it++){
         cout << it->first<<endl;
         if(it->first < bps)
@@ -553,12 +551,12 @@ sai_status_t bmtCacheManager::consume_candidate(uint64_t bps,uint32_t &offset){
         else
         {
             offset = (--it)->second; // removing previous element in list
-            SWSS_LOG_NOTICE("candidate consumption sucess: offset: %d", bps);
+            SWSS_LOG_NOTICE("candidate consumption sucess: bps: %lu ,offset: %d", it->first ,offset);
             evac_candidates.erase(it);
             return SAI_STATUS_SUCCESS;
         }
     }
-    SWSS_LOG_NOTICE("No candidate fits requested bps %d", bps);
+    SWSS_LOG_NOTICE("No candidate fits requested bps %lu", bps);
     return SAI_STATUS_FAILURE; // list is empty;
 }
 
@@ -573,26 +571,12 @@ void bmtCacheManager::insert_candidate(uint64_t bps,uint32_t offset){
 uint64_t bmtCacheManager::get_insertion_thresh(){
     if (evac_candidates.size()>0)
         return evac_candidates.back().first; //lowest bps in candidates
-    else
-        return UINT64_MAX; // prevent insertion if no candidates are avaliable
+    return UINT64_MAX; // prevent insertion if no candidates are avaliable
 }
 uint64_t bmtCacheManager::get_eviction_thresh(){
     if (evac_candidates.size()>0)
         return evac_candidates.back().first;//highest bps in candidates
-    else
-        return UINT64_MAX;
-}
-
-sai_status_t bmt_cache_remove_rule(uint32_t offset){
-    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-    
-    SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
-    sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
-    if (status == SAI_STATUS_SUCCESS) {
-        vhost_table.entry[offset].valid = false;
-        vhost_table.free_offsets.push_back(offset);
-    }
-    return status;
+    return UINT64_MAX;
 }
 
 void bmt_flush_cache(){
@@ -624,7 +608,7 @@ void bmt_cache_evacuator(){
     vector<uint32_t> evac_candidates;
     uint64_t counter_values[EVAC_BATCH_SIZE];
     uint64_t counter_diff[EVAC_BATCH_SIZE];
-    bmt_time_t time_delta[EVAC_BATCH_SIZE];
+    bmt_time_t stime[EVAC_BATCH_SIZE];
     uint32_t batch_start;
     uint32_t batch_end = 0;
 
@@ -636,19 +620,18 @@ void bmt_cache_evacuator(){
         // seperate loops for constant read interval time.
         for (uint32_t i=batch_start ; i<batch_end; i++ ){
             counter_read_by_offset(i, &counter_values[i-batch_start]);
-            time_delta[i-batch_start] = chrono::steady_clock::now();
+            stime[i-batch_start] = chrono::steady_clock::now();
         }
         usleep(100000);
         for (uint32_t i=batch_start ; i<batch_end; i++ ){
             counter_read_by_offset(i, &counter_diff[i-batch_start]);
-            time_delta[i-batch_start] = chrono::steady_clock::now()-time_delta[i-batch_start];
             // counter normalized to bps:
-            counter_diff[i-batch_start] = (counter_diff[i-batch_start] - counter_values[i-batch_start])*1000000/chrono::duration_cast<std::chrono::microseconds>(time_delta[i-batch_start]).count();
+            counter_diff[i-batch_start] = (counter_diff[i-batch_start] - counter_values[i-batch_start])*1000000/chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - stime[i-batch_start]).count();
         }
         for (uint32_t i=batch_start ; i<batch_end; i++ ){
             SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
             // TODO probably more efficiant to sort before iteration:
-            if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < bmtCacheManager.get_eviction_thresh)){ 
+            if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < cacheManager.get_eviction_thresh())){ 
                 evac_candidates.push_back(i);
                 SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
             }
