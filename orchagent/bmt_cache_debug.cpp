@@ -8,14 +8,31 @@
 #include <iostream>
 #include <sstream>
 #include <map>
+#include <cstring>
+#include <deque>
 
 #include "bmt_common.h"
 #include "logger.h"
-#include "bmt_common.h"
+#include "bmt_orch_constants.h"
 
 extern global_config_t g;
 pthread_t debug_thread;
 int sock = 0;
+
+template<typename O> void split(const std::string &s, char delim, O result) {
+    std::stringstream ss;
+    ss.str(s);
+    std::string item;
+    while (getline(ss, item, delim)) {
+        if (!item.empty()) *(result++) = item;
+    }
+}
+
+std::deque<std::string> split(const std::string &s, char delim) {
+    std::deque<std::string> elems;
+    split(s, delim, back_inserter(elems));
+    return elems;
+}
 
 /**
  * Simple command mapping:
@@ -26,39 +43,85 @@ int sock = 0;
  *
  */
 void dispatch(std::string &input, global_config_t* cfg, std::ostringstream &stream) {
-    (void)cfg;
-    if (!input.compare("evac-stop")) {
-        cfg->exitFlag = true;
-        stream << "Exiting evacuator thread";
+    try {
+        std::deque<std::string> input_args;
+        input_args = split(input,' ');
+        if (input_args.empty()) {
+            stream << input << "??? Try - status, flush, pause, resume, window, ithresh, ethresh, evac-stop, insert-stop";
+        }
+        else {
+            std::string first = input_args.front();
+            input_args.pop_front();
+            if (!first.compare("evac-stop")) {
+                cfg->exitFlag = true;
+                stream << "Exiting evacuator thread";
+            }
+            else if (!first.compare("insert-stop")) {
+                cfg->scanDpdkPort = true;
+                stream << "Exiting inserter thread";
+            }
+            else if (!first.compare("flush")) {
+                cfg->flushCache = true;
+                stream << "Flushing the cache";
+            }
+            else if (!first.compare("pause")) {
+                cfg->pauseCacheInsertion = true;
+                stream << "Insertion paused";
+            }
+            else if (!first.compare("resume")) {
+                cfg->pauseCacheInsertion = false;
+                stream << "Insertion resumed";
+            }
+            else if (!first.compare("window")) {
+                if (!input_args.empty()) {
+                    std::string value = input_args.front();
+                    cfg->insertionWindowSize = (uint32_t) stoul(value,nullptr,0);
+                    input_args.pop_front();
+                }
+                stream << "Insertion window size is " << cfg->insertionWindowSize;
+            }
+            else if (!first.compare("ithresh")) {
+                if (!input_args.empty()) {
+                    std::string value = input_args.front();
+                    cfg->insertionThreshold = (uint32_t) stoul(value,nullptr,0);
+                    input_args.pop_front();
+                }
+                stream << "Insertion threshold is " << cfg->insertionThreshold;
+
+            }
+            else if (!first.compare("ethresh")) {
+                if (!input_args.empty()) {
+                    std::string value = input_args.front();
+                    cfg->evacuationThreshold = (uint32_t) stoul(value,nullptr,0);
+                    input_args.pop_front();
+                }
+                stream << "Evacuation threshold is " << cfg->evacuationThreshold;
+            }
+            else if (!first.compare("status") || !input.compare("s")) {
+                stream << "sampler init status " << cfg->sampler_init_status << std::endl;
+                stream << "inserter is " << (cfg->pauseCacheInsertion ? "paused" : "running") << std::endl;
+                stream << "insert window size " << cfg->insertionWindowSize << std::endl;
+                stream << "insert threshold " << cfg->insertionThreshold << std::endl;
+                stream << "evacuation threshold " << cfg->evacuationThreshold << std::endl;
+                stream << "cache inserts " << cfg->cacheInsertCount
+                    << ", skip " << cfg->cacheInsertSkip
+                    << ", remove " << cfg->cacheRemoveCount << std::endl;
+                stream << "entry counter ";
+                for (int i = 0; i <  VHOST_TABLE_SIZE; i++) {
+                    stream << "#" << i << ": "<< cfg->entryCounters[i] << ", ";
+                }
+                stream << std::endl;
+                stream << "flushCache " << cfg->flushCache << std::endl;
+                stream << "exitFlag " << cfg->exitFlag << std::endl;
+                stream << "scanDpdkPort " << cfg->scanDpdkPort << std::endl;
+            }
+            else {
+                stream << input << "??? Try - status, flush, pause, resume, evac-stop, insert-stop";
+            }
+        }
     }
-    else if (!input.compare("insert-stop")) {
-        cfg->scanDpdkPort = true;
-        stream << "Exiting inserter thread";
-    }
-    else if (!input.compare("flush")) {
-        cfg->flushCache = true;
-        stream << "Flushing the cache";
-    }
-    else if (!input.compare("pause")) {
-        cfg->pauseCacheInsertion = true;
-        stream << "Insertion paused";
-    }
-    else if (!input.compare("resume")) {
-        cfg->pauseCacheInsertion = false;
-        stream << "Insertion resumed";
-    }
-    else if (!input.compare("status") || !input.compare("s")) {
-        stream << "sampler init status " << cfg->sampler_init_status << std::endl;
-        stream << "inserter is " << (cfg->pauseCacheInsertion ? "paused" : "running") << std::endl;
-        stream << "cacheInsertCount " << cfg->cacheInsertCount << std::endl;
-        stream << "cacheInsertSkip " << cfg->cacheInsertSkip << std::endl;
-        stream << "cacheRemoveCount " << cfg->cacheRemoveCount << std::endl;
-        stream << "flushCache " << cfg->flushCache << std::endl;
-        stream << "exitFlag " << cfg->exitFlag << std::endl;
-        stream << "scanDpdkPort " << cfg->scanDpdkPort << std::endl;
-    }
-    else {
-        stream << input << "??? Try - status, flush, pause, resume, evac-stop, insert-stop";
+    catch (const std::exception &e) {
+        stream << "Invalid command \"" << input << "\"" << ": " << e.what() << std::endl;
     }
 }
 

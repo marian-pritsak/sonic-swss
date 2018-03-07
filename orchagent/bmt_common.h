@@ -14,6 +14,8 @@ extern "C" {
 
 #include "macaddress.h"
 
+#include "bmt_orch_constants.h"
+
 
 typedef struct bmt_init_status_t{
   bool tunnel_encap_map_created = false;
@@ -49,14 +51,21 @@ typedef struct app_config {
     std::ofstream recordOfs;
     std::string recordFile;
 
+    // controls
     bool exitFlag     = false;
     bool scanDpdkPort = true;
     bool flushCache   = false;
     bool pauseCacheInsertion = false;
     int sampler_init_status = -1;
+    uint32_t insertionWindowSize = INSERTER_WINDOW_SIZE;
+    uint32_t insertionThreshold = INSERTER_THRESH;
+    uint32_t evacuationThreshold = EVAC_TRESH;
+
+    // stats
     uint32_t cacheInsertCount = 0;
     uint32_t cacheInsertSkip = 0;
     uint32_t cacheRemoveCount = 0;
+    uint64_t entryCounters[VHOST_TABLE_SIZE];
 
     /* Global database mutex */
     std::mutex dbMutex;

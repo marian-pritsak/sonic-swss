@@ -519,17 +519,17 @@ int bmt_cache_inserter(void)
         pkt_map.clear();
         while(g.scanDpdkPort) {
             pkt_map.clear();
-            SWSS_LOG_NOTICE("[inserter] listening to %d packets...", INSERTER_WINDOW_SIZE);
-            pcap_loop(handle, INSERTER_WINDOW_SIZE, bmt_parse_packet, (u_char *) &pkt_map);
+            SWSS_LOG_NOTICE("[inserter] listening to %d packets...", g.insertionWindowSize);
+            pcap_loop(handle, g.insertionWindowSize, bmt_parse_packet, (u_char *) &pkt_map);
             for(auto const &it_pkt : pkt_map) {
-                if (it_pkt.second.second > INSERTER_THRESH){
+                if (it_pkt.second.second > g.insertionThreshold){
                     SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second.second);
                     if (!g.pauseCacheInsertion) {
                         sai_status_t status = bmt_cache_insert_vhost_entry(it_pkt.first.second, it_pkt.second.first, it_pkt.first.first);
                         SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %d",status);
                         if (status != SAI_STATUS_SUCCESS)
                             SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
-			else
+                        else
                             g.cacheInsertCount++;
                     }
                 } else {
@@ -644,7 +644,7 @@ void bmt_cache_evacuator(){
                 }
                 for (uint32_t i=batch_start ; i<batch_end; i++ ){
                     SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
-                    if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < EVAC_TRESH)){
+                    if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < g.evacuationThreshold)){
                         evac_candidates.push_back(i);
                         SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
                     }
@@ -660,17 +660,16 @@ void bmt_cache_evacuator(){
 
 
 void bmt_cache_counters_read() {
-	uint64_t counter;
-	while (!g.exitFlag) {
-		{
-		lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-		//SWSS_LOG_NOTICE("reading counters from all entries");
-		for (uint32_t i=0; i<VHOST_TABLE_SIZE; i++) {
-			counter_read_by_offset(i, &counter);
-		}
-		}
-		sleep(1);
-	}
+    while (!g.exitFlag) {
+        {
+            lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+            //SWSS_LOG_NOTICE("reading counters from all entries");
+            for (uint32_t i=0; i<VHOST_TABLE_SIZE; i++) {
+                counter_read_by_offset(i, &g.entryCounters[i]);
+            }
+        }
+        sleep(1);
+    }
 }
 
 void bmt_cache_start() {
