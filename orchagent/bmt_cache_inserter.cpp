@@ -526,10 +526,11 @@ int bmt_cache_inserter(void)
                     SWSS_LOG_NOTICE("[inserter] flow insertion, was seen %d times in the window",it_pkt.second.second);
                     if (!g.pauseCacheInsertion) {
                         sai_status_t status = bmt_cache_insert_vhost_entry(it_pkt.first.second, it_pkt.second.first, it_pkt.first.first);
-                        g.cacheInsertCount++;
                         SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %d",status);
                         if (status != SAI_STATUS_SUCCESS)
                             SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
+			else
+                            g.cacheInsertCount++;
                     }
                 } else {
                     SWSS_LOG_NOTICE("[inserter] skipping flow insertion, was seen %d times in the window",it_pkt.second.second);

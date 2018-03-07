@@ -23,13 +23,7 @@ using namespace swss;
  * Once Orch class refactoring is done, these global variables
  * should be removed from here.
  */
-int gBatchSize = 0;
-bool gSwssRecord = false;
-bool gLogRotate = false;
-ofstream gRecordOfs;
-string gRecordFile;
-/* Global database mutex */
-mutex gDbMutex;
+global_config_t g;
 
 int main(int argc, char **argv)
 {

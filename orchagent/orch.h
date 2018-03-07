@@ -15,6 +15,7 @@ extern "C" {
 #include "consumerstatetable.h"
 #include "notificationconsumer.h"
 #include "selectabletimer.h"
+#include "bmt_common.h"
 
 using namespace std;
 using namespace swss;

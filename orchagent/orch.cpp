@@ -10,7 +10,6 @@
 #include "tokenize.h"
 #include "logger.h"
 #include "consumerstatetable.h"
-#include "bmt_common.h"
 
 using namespace swss;
 
