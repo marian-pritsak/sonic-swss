@@ -9,7 +9,7 @@ dist_swss_DATA = \
 		 pfc_detect_broadcom.lua \
 		 pfc_restore.lua
 
-bin_PROGRAMS = orchagent routeresync
+bin_PROGRAMS = orchagent routeresync bmt_debug
 
 if DEBUG
 DBGFLAGS = -ggdb -DDEBUG
@@ -78,3 +78,8 @@ routeresync_SOURCES = routeresync.cpp
 routeresync_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
 routeresync_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
 routeresync_LDADD = -lswsscommon
+
+bmt_debug_SOURCES = bmt_debug.cpp
+bmt_debug_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
+bmt_debug_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
+bmtor_cli_LDADD = 
