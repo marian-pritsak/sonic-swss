@@ -656,7 +656,7 @@ void bmt_cache_evacuator(){
             counter_diff[i-batch_start] = (counter_diff[i-batch_start] - counter_values[i-batch_start])*1000000/chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - stime[i-batch_start]).count();
         }
         for (uint32_t i=batch_start ; i<batch_end; i++ ){
-            SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
+            // SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
             // TODO probably more efficiant to sort before iteration:
             if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < cacheManager.get_eviction_thresh())){ 
                 evac_candidates.push_back(i);
