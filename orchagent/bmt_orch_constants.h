@@ -15,5 +15,5 @@
 #define CACHE_EVAC_SIZE (1) // the number of expected elements in vhost_table.free_offsets
 #define EVAC_BATCH_SIZE (2) // number of counters to probe each time
 #define INSERTER_WINDOW_SIZE 20 //[usec]
-#define INSERTER_THRESH_MIN 100000 // minimal bw of flow to enter cache
+#define INSERTER_THRESH 100000 // minimal bw of flow to enter cache
 #endif /** __BMT_ORCH_CONSTANTS_H_ */
