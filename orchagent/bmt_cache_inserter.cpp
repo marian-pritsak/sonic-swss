@@ -589,8 +589,8 @@ void bmtCacheManager::insert_candidate(uint64_t bps,uint32_t offset){
 uint64_t bmtCacheManager::get_insertion_thresh(){
     // todo mybe better to save the value of the last one consumed and not the current.
     if (evac_candidates.size()>0 && vhost_table.used_entries == (VHOST_TABLE_SIZE-1))
-        return evac_candidates.back().first; //lowest bps in candidates
-    return INSERTER_THRESH_MIN; // insert any if no candidates are avaliable
+        return max(evac_candidates.back().first,g.insertionThreshold); //lowest bps in candidates
+    return g.insertionThreshold; // insert any if no candidates are avaliable
 }
 uint64_t bmtCacheManager::get_eviction_thresh(){
     if (evac_candidates.size() == CACHE_EVAC_SIZE)
