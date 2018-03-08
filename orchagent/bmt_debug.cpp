@@ -98,7 +98,9 @@ int main(int argc, char *argv[]) {
     }
     for (int i = 1; i < argc; i++) {
         message += argv[i];
-        message += " ";
+        if (i + 1 < argc) {
+            message += " ";
+        }
     }
     do_debug(false, message);
     return 0;
