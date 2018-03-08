@@ -33,11 +33,10 @@
   int sock{0};
   struct sockaddr_in si_other;
 
-void do_debug()
+void do_debug(bool cli, std::string& message)
 {
     printf("Debug BMT client connecting on port %d\n", DEBUG_PORT);
     socklen_t slen=sizeof(si_other);
-    std::string message;
     char buf[BUFLEN];
 
     if ( (sock=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
@@ -52,16 +51,24 @@ void do_debug()
     if (inet_aton(SERVER , &si_other.sin_addr) == 0) {
         fprintf(stderr,"BMT debug error in inet_aton()");
     }
-    while(1)
-    {
-        printf("BMT> ");
-        getline( std::cin, message );
-        memcpy(buf, message.c_str(), message.length()+1);
 
+    do
+    {
+        if (cli) {
+            printf("BMT> ");
+            getline( std::cin, message );
+        }
+        else if (message.length() == 0) {
+            continue;
+        }
+        else {
+            std::cout << message << std::endl;
+        }
+
+        memcpy(buf, message.c_str(), message.length()+1);
         if (!message.compare("quit") || !message.compare("q") || !message.compare("exit")) {
             exit(0);
         }
-
         //send the message
         if (sendto(sock, buf, message.length(), 0 , (struct sockaddr*)&si_other, slen)==-1) {
             fprintf(stderr,"BMT debug error in sendto()");
@@ -77,15 +84,25 @@ void do_debug()
         }
         printf("%s\n", buf);
         //puts(buf);
-    }
+    } while (cli);
 
     close(sock);
 }
 
 int main(int argc, char *argv[]) {
     std::cout << "BMT debug " << std::endl;
-    do_debug();
+    // go to interactive CLI mode if no params
+    std::string message;
+    if (argc == 1) {
+        do_debug(true, message);
+    }
+    for (int i = 1; i < argc; i++) {
+        message += argv[i];
+        if (i + 1 < argc) {
+            message += " ";
+        }
+    }
+    do_debug(false, message);
     return 0;
-
 }
 

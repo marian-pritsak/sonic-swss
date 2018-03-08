@@ -42,12 +42,14 @@ std::deque<std::string> split(const std::string &s, char delim) {
  * flush
  *
  */
+static const char * cmd_list = "??? Try - status, flush, pause, resume, window, ithresh, ethresh, evac-stop, insert-stop";
+
 void dispatch(std::string &input, global_config_t* cfg, std::ostringstream &stream) {
     try {
         std::deque<std::string> input_args;
         input_args = split(input,' ');
         if (input_args.empty()) {
-            stream << input << "??? Try - status, flush, pause, resume, window, ithresh, ethresh, evac-stop, insert-stop";
+            stream << input << cmd_list;
         }
         else {
             std::string first = input_args.front();
@@ -116,7 +118,7 @@ void dispatch(std::string &input, global_config_t* cfg, std::ostringstream &stre
                 stream << "scanDpdkPort " << cfg->scanDpdkPort << std::endl;
             }
             else {
-                stream << input << "??? Try - status, flush, pause, resume, evac-stop, insert-stop";
+                stream << input << cmd_list;
             }
         }
     }
