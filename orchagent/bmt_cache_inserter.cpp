@@ -4,6 +4,7 @@ extern "C" {
 #include "saihostif.h"
 #include "saisamplepacket.h"
 }
+#include <algorithm>
 #include <arpa/inet.h>
 #include "saihelper.h"
 #include <fstream>
@@ -427,9 +428,12 @@ sai_status_t bmt_cache_remove_rule(uint32_t offset){
         vhost_table.entry[offset].valid = false;
         vhost_table.free_offsets.push_back(offset);
         g.cacheRemoveCount++;
+        if (countersTable)
+            countersTable->del(sai_serialize_object_id(vhost_table.entry[offset].entry_id));
     }
     return status;
 }
+
 
 typedef chrono::steady_clock::time_point bmt_time_t;
 /* inserter main */
@@ -547,18 +551,8 @@ void bmtCacheManager::print_candidates(){
         SWSS_LOG_INFO("[print evac candidates] bps: %lu , offset: %d", it->first,it->second);
     }
 }
-void bmt_cache_remove_rule(uint32_t offset){
-    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
-    
-    SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
-    sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
-    if (status == SAI_STATUS_SUCCESS) {
-        vhost_table.entry[offset].valid = false;
-        vhost_table.free_offsets.push_back(offset);
-        if (countersTable)
-  		    countersTable->del(sai_serialize_object_id(vhost_table.entry[offset].entry_id));
-    }
-}
+
+
 /** added to candidate list the entry cosest to bps from below */
 sai_status_t bmtCacheManager::consume_candidate(uint64_t bps,uint32_t &offset){
     lock_guard<mutex> guard(cacheMutex);    
@@ -589,7 +583,7 @@ void bmtCacheManager::insert_candidate(uint64_t bps,uint32_t offset){
 uint64_t bmtCacheManager::get_insertion_thresh(){
     // todo mybe better to save the value of the last one consumed and not the current.
     if (evac_candidates.size()>0 && vhost_table.used_entries == (VHOST_TABLE_SIZE-1))
-        return max(evac_candidates.back().first,g.insertionThreshold); //lowest bps in candidates
+        return max((uint64_t) evac_candidates.back().first,(uint64_t) g.insertionThreshold); //lowest bps in candidates
     return g.insertionThreshold; // insert any if no candidates are avaliable
 }
 uint64_t bmtCacheManager::get_eviction_thresh(){
