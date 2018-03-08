@@ -35,30 +35,11 @@ extern sai_switch_api_t *sai_switch_api;
 extern sai_router_interface_api_t *sai_router_intfs_api;
 
 #define UNREFERENCED_PARAMETER(P)       (P)
+#define TEST_LOCAL_DBG
 
-/* Global variables */
-sai_object_id_t gVirtualRouterId;
-sai_object_id_t gUnderlayIfId;
+/* Global variables, all in one struct TODO- convert to a class + instance*/
 sai_object_id_t gSwitchId = SAI_NULL_OBJECT_ID;
-// sai_object_id_t default_vhost_table_entry;
-MacAddress gMacAddress;
-
-#define DEFAULT_BATCH_SIZE  128
-int gBatchSize = DEFAULT_BATCH_SIZE;
-
-bool gSairedisRecord = true;
-bool gSwssRecord = true;
-bool gLogRotate = false;
-ofstream gRecordOfs;
-string gRecordFile;
-
-bool gExitFlag     = false;
-bool gScanDpdkPort = true;
-bool gFlushCache   = false;
-
-
-/* Global database mutex */
-mutex gDbMutex;
+global_config_t g;
 
 void usage()
 {
@@ -79,7 +60,7 @@ void sighup_handler(int signo)
     /*
      * Don't do any logging since they are using mutexes.
      */
-    gLogRotate = true;
+    g.logRotate = true;
 
     sai_attribute_t attr;
     attr.id = SAI_REDIS_SWITCH_ATTR_PERFORM_LOG_ROTATE;
@@ -93,8 +74,8 @@ void sighup_handler(int signo)
 
 void sig_handler(int signo){
     if (signo == SIGINT){
-       gScanDpdkPort=false;
-       gExitFlag=true;
+       g.scanDpdkPort=false;
+       g.exitFlag=true;
 
     } 
 }
@@ -112,7 +93,7 @@ void sig_handler(int signo){
 //   //sai_attr.value.objlist.list = (sai_object_id_t *) malloc(sizeof(sai_object_id_t) * max_ports);
 //   sai_attr.value.objlist.count = max_ports;
 //   sai_attr.value.objlist.list = &new_objlist[0];
-//   sai_switch_api->get_switch_attribute(gSwitchId, 1, &sai_attr);
+//   sai_switch_api->get_switch_attribute(switchId, 1, &sai_attr);
 //   // printf("port list\n");
 
 //   sai_attribute_t hw_lane_list_attr;
@@ -182,7 +163,7 @@ void sig_handler(int signo){
 //     vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
 //     vhost_table_entry_attr[6].value.u32 = 0;
 
-//     sai_status_t status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
+//     sai_status_t status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, switchId, 7, vhost_table_entry_attr);
 //     if (status != SAI_STATUS_SUCCESS) {
 //         SWSS_LOG_ERROR("Failed to create table_vhost default entry");
 //         throw "BMToR initialization failure";
@@ -212,24 +193,24 @@ int main(int argc, char **argv)
         switch (opt)
         {
         case 'b':
-            gBatchSize = atoi(optarg);
+            g.batchSize = atoi(optarg);
             break;
         case 'm':
-            gMacAddress = MacAddress(optarg);
+            g.macAddress = MacAddress(optarg);
             break;
         case 'r':
             if (!strcmp(optarg, "0"))
             {
-                gSairedisRecord = false;
-                gSwssRecord = false;
+                g.sairedisRecord = false;
+                g.swssRecord = false;
             }
             else if (!strcmp(optarg, "1"))
             {
-                gSwssRecord = false;
+                g.swssRecord = false;
             }
             else if (!strcmp(optarg, "2"))
             {
-                gSairedisRecord = false;
+                g.sairedisRecord = false;
             }
             else if (!strcmp(optarg, "3"))
             {
@@ -258,7 +239,6 @@ int main(int argc, char **argv)
     }
 
     SWSS_LOG_NOTICE("--- Starting Orchestration Agent ---");
-
     initSaiApi();
     initSaiRedis(record_location);
 
@@ -274,16 +254,16 @@ int main(int argc, char **argv)
     attrs.push_back(attr);
 
     /* Disable/enable SwSS recording */
-    if (gSwssRecord)
+    if (g.swssRecord)
     {
-        gRecordFile = record_location + "/" + "swss.rec";
-        gRecordOfs.open(gRecordFile, std::ofstream::out | std::ofstream::app);
-        if (!gRecordOfs.is_open())
+        g.recordFile = record_location + "/" + "swss.rec";
+        g.recordOfs.open(g.recordFile, std::ofstream::out | std::ofstream::app);
+        if (!g.recordOfs.is_open())
         {
-            SWSS_LOG_ERROR("Failed to open SwSS recording file %s", gRecordFile.c_str());
+            SWSS_LOG_ERROR("Failed to open SwSS recording file %s", g.recordFile.c_str());
             exit(EXIT_FAILURE);
         }
-        gRecordOfs << getTimestamp() << "|recording started" << endl;
+        g.recordOfs << getTimestamp() << "|recording started" << endl;
     }
 
     attr.id = SAI_SWITCH_ATTR_PORT_STATE_CHANGE_NOTIFY;
@@ -294,10 +274,10 @@ int main(int argc, char **argv)
     attr.value.ptr = (void *)on_switch_shutdown_request;
     attrs.push_back(attr);
 
-    if (gMacAddress)
+    if (g.macAddress)
     {
         attr.id = SAI_SWITCH_ATTR_SRC_MAC_ADDRESS;
-        memcpy(attr.value.mac, gMacAddress.getMac(), 6);
+        memcpy(attr.value.mac, g.macAddress.getMac(), 6);
         attrs.push_back(attr);
     }
 
@@ -310,7 +290,7 @@ int main(int argc, char **argv)
     SWSS_LOG_NOTICE("Create a switch");
 
     /* Get switch source MAC address if not provided */
-    if (!gMacAddress)
+    if (!g.macAddress)
     {
         attr.id = SAI_SWITCH_ATTR_SRC_MAC_ADDRESS;
         status = sai_switch_api->get_switch_attribute(gSwitchId, 1, &attr);
@@ -321,7 +301,7 @@ int main(int argc, char **argv)
         }
         else
         {
-            gMacAddress = attr.value.mac;
+            g.macAddress = attr.value.mac;
         }
     }
 
@@ -335,29 +315,29 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    gVirtualRouterId = attr.value.oid;
-    SWSS_LOG_NOTICE("Get switch virtual router ID %lx", gVirtualRouterId);
+    g.virtualRouterId = attr.value.oid;
+    SWSS_LOG_NOTICE("Get switch virtual router ID %lx", g.virtualRouterId);
 
     /* Create a loopback underlay router interface */
     vector<sai_attribute_t> underlay_intf_attrs;
 
     sai_attribute_t underlay_intf_attr;
     underlay_intf_attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
-    underlay_intf_attr.value.oid = gVirtualRouterId;
+    underlay_intf_attr.value.oid = g.virtualRouterId;
     underlay_intf_attrs.push_back(underlay_intf_attr);
 
     underlay_intf_attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
     underlay_intf_attr.value.s32 = SAI_ROUTER_INTERFACE_TYPE_LOOPBACK;
     underlay_intf_attrs.push_back(underlay_intf_attr);
 
-    status = sai_router_intfs_api->create_router_interface(&gUnderlayIfId, gSwitchId, (uint32_t)underlay_intf_attrs.size(), underlay_intf_attrs.data());
+    status = sai_router_intfs_api->create_router_interface(&g.underlayIfId, gSwitchId, (uint32_t)underlay_intf_attrs.size(), underlay_intf_attrs.data());
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to create underlay router interface %d", status);
         exit(EXIT_FAILURE);
     }
 
-    SWSS_LOG_NOTICE("Created underlay router interface ID %lx", gUnderlayIfId);
+    SWSS_LOG_NOTICE("Created underlay router interface ID %lx", g.underlayIfId);
 
     /* Initialize orchestration components */
     DBConnector *appl_db = new DBConnector(APPL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);

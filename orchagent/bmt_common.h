@@ -8,6 +8,14 @@ extern "C" {
  
 #include <sairedis.h>
 
+#include <fstream>
+#include <iostream>
+#include <mutex>
+
+#include "macaddress.h"
+
+#include "bmt_orch_constants.h"
+
 
 typedef struct bmt_init_status_t{
   bool tunnel_encap_map_created = false;
@@ -28,32 +36,40 @@ typedef struct bmt_init_status_t{
   bool dpdk_bridge_port_created = false;
 } bmt_init_status_t;
 
+#define DEFAULT_BATCH_SIZE  128
 
-/*extern sai_switch_api_t *switch_api;
-extern sai_object_id_t g_switch_id;
-extern sai_port_api_t *port_api;
-extern sai_tunnel_api_t *tunnel_api;
-extern sai_vlan_api_t *vlan_api;
-extern sai_bridge_api_t *bridge_api;
-extern sai_bmtor_api_t *bmtor_api;
-extern sai_object_id_t tunnel_encap_map;
-extern sai_object_id_t tunnel_decap_map;
-extern sai_object_id_t tunnel_decap_map_entry;
-extern sai_object_id_t tunnel_encap_map_entry;
-extern sai_object_id_t tunnel_id;
-extern sai_object_id_t tunnel_term_table_entry;
-extern sai_object_id_t bridge_id;
-extern sai_object_id_t vlan_oid;
-extern sai_object_id_t vlan_member_oid;
-extern sai_object_id_t dpdk_vlan_member_oid;
-extern sai_object_id_t bridge_port_id;
-extern sai_object_id_t dpdk_bridge_port_id;
-extern sai_object_id_t vhost_table_entry;
-extern sai_object_id_t default_vhost_table_entry;
-extern sai_object_id_t peering_entry;
-extern sai_object_id_t ports_to_bind[32];
-extern sai_object_list_t ports_to_bind_list;
-*/
+/* Global variables, all in one struct TODO- convert to a class + instance*/
+typedef struct app_config {
+    sai_object_id_t virtualRouterId;
+    sai_object_id_t underlayIfId;
+    // sai_object_id_t default_vhost_table_entry;
+    swss::MacAddress macAddress;
+    int batchSize = DEFAULT_BATCH_SIZE;
+    bool sairedisRecord = true;
+    bool swssRecord = true;
+    bool logRotate = false;
+    std::ofstream recordOfs;
+    std::string recordFile;
+
+    // controls
+    bool exitFlag     = false;
+    bool scanDpdkPort = true;
+    bool flushCache   = false;
+    bool pauseCacheInsertion = false;
+    int sampler_init_status = -1;
+    uint32_t insertionWindowSize = INSERTER_WINDOW_SIZE;
+    uint32_t insertionThreshold = INSERTER_THRESH;
+    uint32_t evacuationThreshold = EVAC_TRESH;
+
+    // stats
+    uint32_t cacheInsertCount = 0;
+    uint32_t cacheInsertSkip = 0;
+    uint32_t cacheRemoveCount = 0;
+    uint64_t entryCounters[VHOST_TABLE_SIZE];
+
+    /* Global database mutex */
+    std::mutex dbMutex;
+} global_config_t;
 
 sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
 void  bmt_deinit(bmt_init_status_t* bmt_common_init);

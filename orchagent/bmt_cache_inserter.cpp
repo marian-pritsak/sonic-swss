@@ -23,13 +23,14 @@ extern "C" {
 #include "bmt_orch_constants.h"
 #include "bmt_common.h"
 #include "bmt_cache_inserter.h"
+#include "bmt_cache_debug.h"
 #include "bmtorcacheorch.h"
 #include "logger.h"
 #include <unistd.h>
 #include <string.h>
 #include "portsorch.h"
 #include "ipprefix.h"
-
+#include "saiserialize.h"
 
 #include <linux/if_packet.h>
 #include <string.h>
@@ -41,6 +42,8 @@ extern "C" {
 #include <ctime>
 #include <cstdlib>
 #include <bits/stdc++.h>
+#include "bmt_common.h"
+extern global_config_t g;
 
 using namespace std;
 extern sai_hostif_api_t *sai_hostif_api;
@@ -54,7 +57,6 @@ extern PortsOrch *gPortsOrch;
 extern BmToRCacheOrch *gBmToRCacheOrch;
 
 typedef struct bmt_dpdk_pkt_t {
-    bool valid;
     uint32_t underlay_dip;
     uint32_t overlay_dip;
     uint32_t vni;
@@ -63,8 +65,7 @@ typedef struct bmt_dpdk_pkt_t {
 struct bmt_dpdk_pkt_compare_t {
     bool operator()(const bmt_dpdk_pkt_t &pkt1, const bmt_dpdk_pkt_t &pkt2) const
     {
-      return (pkt1.underlay_dip == pkt2.underlay_dip)
-          && (pkt1.overlay_dip == pkt2.overlay_dip)
+      return (pkt1.overlay_dip == pkt2.overlay_dip)
           && (pkt1.vni == pkt2.vni);
     }
 };
@@ -85,9 +86,9 @@ typedef struct bmt_vhost_table_t {
     vector<uint32_t>    free_offsets; // TODO implement cache evac
 } bmt_vhost_table_t;
 
-// typedef std::map<bmt_dpdk_pkt_t,uint32_t, bmt_dpdk_pkt_compare_t> DpdkPacketMap;
-typedef std::map<std::pair<uint32_t, uint32_t>, std::pair<uint32_t, uint64_t>> DpdkPacketMap; // vni ovrly_ip -> undrlay_ip, count TODO - redo this
-
+typedef std::pair<uint32_t, uint32_t> DpdkPacketKey;    // vni, overlay_ip
+typedef std::pair<uint32_t, uint64_t> DpdkPacketValue;  // underlay_ip, count
+typedef std::map<DpdkPacketKey, DpdkPacketValue> DpdkPacketMap;
 
 /* Global variables */
 extern sai_object_id_t gSwitchId;
@@ -99,10 +100,9 @@ sai_object_id_t hostifOid;
 sai_object_id_t hostif_table_entryOid;
 sai_object_id_t trapgroupOid;
 bmt_vhost_table_t vhost_table;
-extern bool gScanDpdkPort;
-extern bool gFlushCache;
-extern bool gExitFlag;
 bmtCacheManager cacheManager;
+DBConnector *countersDb = 0;
+Table *countersTable = 0;
 
 sai_status_t bmt_get_free_offset(uint32_t &offset){
     if (vhost_table.used_entries == (VHOST_TABLE_SIZE-1)){
@@ -154,9 +154,9 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
 
 // sai_status_t bmt_parse_packet(const u_char *buf, sai_size_t buffer_size, bmt_dpdk_pkt_t *pkt){
 void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *buf) {
-//--------------------------------------
-// netdev encap via ip4 packet: so vxlan is shifted:
-// L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)  
+    //--------------------------------------
+    // netdev encap via ip4 packet: so vxlan is shifted:
+    // L2 (0-13) => L3 (14-33) => udp (34-41) => vxlan (42-49) => L2 (50-63) => L3 (64-83)
     sai_size_t buffer_size = header->len;
     // SWSS_LOG_NOTICE("[inserter] [recv] parsing packet of len %d", header->len);
     // pkt.valid = false;
@@ -165,8 +165,6 @@ void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_ch
     uint8_t vxlan_flags;
     uint8_t inner_ipv4_ver;
     uint8_t outer_ipv4_ver;
-    uint32_t len;
-    bmt_dpdk_pkt_t pkt;
     if (buffer_size >= 84){ // TODO should be 84
         etherType[0]   = (uint16_t)(((uint16_t)buf[12]<<8)|(uint16_t)buf[13]); // outer L2 etherType (tagged)
         outer_ipv4_ver = (uint8_t)(buf[14]>>4);
@@ -174,38 +172,36 @@ void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_ch
         etherType[1]   = (uint16_t)(((int)buf[62]<<8)|(int)buf[63]); // inner etherType
         inner_ipv4_ver = (uint8_t)(buf[64]>>4);      
         if(
-            etherType[0]    == TYPE_IPV4 &&
-            etherType[1]    == TYPE_IPV4 &&
-            vxlan_flags     == 8         &&
-            outer_ipv4_ver  == 4         &&
-            inner_ipv4_ver  == 4
+                etherType[0]    == TYPE_IPV4 &&
+                etherType[1]    == TYPE_IPV4 &&
+                vxlan_flags     == 8         &&
+                outer_ipv4_ver  == 4         &&
+                inner_ipv4_ver  == 4
         )
         {
-            pkt.valid = true;
-            pkt.vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
-            pkt.underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]); 
-            pkt.overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]); 
-            len = ((((uint32_t)buf[16])<<8) | ((uint32_t)buf[17]));
-            SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:     vni= %d.  overlay  ip=%d.%d.%d.%d. underlay ip=%d.%d.%d.%d",int(pkt.vni), int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]), int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
-                std::pair<uint32_t, uint32_t> pkt_pair = std::make_pair(pkt.vni, pkt.overlay_dip);
-                DpdkPacketMap::iterator it = pkt_map->find(pkt_pair);
-                if (it != pkt_map->end())
-                    it->second.second += len;
-                else 
-                    (*pkt_map)[pkt_pair]=std::make_pair(pkt.underlay_dip, len);
-                for (it = pkt_map->begin(); it != pkt_map->end(); ++it) {
-                    // SWSS_LOG_NOTICE("pkt 0x%x (ovrly) @ vni %d.  cnt = %d (%d)", it->first.second, it->first.first, it->second.second, (*pkt_map)[pkt_pair].second);
-                }
-            // return SAI_STATUS_SUCCESS;
+
+            uint32_t vni = (((uint32_t)buf[46])<<16) | (((uint32_t)buf[47])<<8) | ((uint32_t)buf[48]);
+            uint32_t underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]);
+            uint32_t overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]);
+            uint32_t len = ((((uint32_t)buf[16])<<8) | ((uint32_t)buf[17]));
+            SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:     vni= %ul.  overlay  ip=%d.%d.%d.%d. underlay ip=%d.%d.%d.%d",vni, int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]), int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
+            DpdkPacketKey pkt_pair = std::make_pair(vni, overlay_dip);
+            DpdkPacketMap::iterator it = pkt_map->find(pkt_pair);
+            if (it != pkt_map->end())
+                it->second.second += len;
+            else
+                (*pkt_map)[pkt_pair]=std::make_pair(underlay_dip, len);
+//            for (it = pkt_map->begin(); it != pkt_map->end(); ++it) {
+//                SWSS_LOG_NOTICE("pkt 0x%x (ovrly) @ vni %d.  cnt = %d (%d)", it->first.second, it->first.first, it->second.second, (*pkt_map)[pkt_pair].second);
+//            }
         }
         else {
-            SWSS_LOG_NOTICE("[inserter] [recv] not vxlan packet");
+            SWSS_LOG_NOTICE("[inserter] [recv] non-vxlan packet");
         }
     }
     else {
         SWSS_LOG_NOTICE("[inserter] [recv] short packet");
     }
-    // return SAI_STATUS_FAILURE;
 }
 
 sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
@@ -213,7 +209,6 @@ sai_status_t bmt_get_port_vect_from_vni(uint32_t vni, uint16_t* port_vect){
     *port_vect = (uint16_t) 0xfff;
     return SAI_STATUS_SUCCESS;
 }
-
 
 int bmt_init_dpdk_traffic_sampler(){
     //lock_guard<mutex> guard(cout_mutex);
@@ -357,7 +352,6 @@ int bmt_init_dpdk_traffic_sampler(){
     }
     SWSS_LOG_ERROR("[inserter] Create default host interface table");
 
-
     SWSS_LOG_ERROR("[inserter] sampler init success.");
     return 0;
 }
@@ -420,6 +414,7 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
     }   
 
     SWSS_LOG_ERROR("[inserter] sampler deinit success.");
+
     return 0;
 }
 
@@ -431,6 +426,7 @@ sai_status_t bmt_cache_remove_rule(uint32_t offset){
     if (status == SAI_STATUS_SUCCESS) {
         vhost_table.entry[offset].valid = false;
         vhost_table.free_offsets.push_back(offset);
+        g.cacheRemoveCount++;
     }
     return status;
 }
@@ -439,6 +435,8 @@ typedef chrono::steady_clock::time_point bmt_time_t;
 /* inserter main */
 int bmt_cache_inserter(void)
 {
+    bmt_cache_debug_init();
+
     // int sockfd;
     // we wait untill swss finish init - (runing async)
     SWSS_LOG_ENTER();
@@ -449,9 +447,9 @@ int bmt_cache_inserter(void)
     sai_status_t saistatus;
     SWSS_LOG_NOTICE("[inserter] DEBUG: found dpdk port (0x%lx).", dpdk_port);
     /* init dpdk port trapping via acl*/
-    int sampler_init_status = bmt_init_dpdk_traffic_sampler();
-    SWSS_LOG_NOTICE("[inserter] DEBUG: sampler initialization finished. status: %d", sampler_init_status);
-    if (sampler_init_status==0) { // only on init success    
+    g.sampler_init_status = bmt_init_dpdk_traffic_sampler();
+    SWSS_LOG_NOTICE("[inserter] DEBUG: sampler initialization finished. status: %d", g.sampler_init_status);
+    if (g.sampler_init_status==0) { // only on init success
         pcap_t *handle;         /* Session handle */
         char errbuf[PCAP_ERRBUF_SIZE];  /* Error string */
         struct bpf_program fp;      /* The compiled filter expression */
@@ -489,12 +487,15 @@ int bmt_cache_inserter(void)
         pkt_map.clear();
         uint64_t window_time;
         uint32_t offset;
-        while(gScanDpdkPort) { 
+        while(g.scanDpdkPort) {
             pkt_map.clear();
-            SWSS_LOG_NOTICE("[inserter] listening for %d packets...", INSERTER_WINDOW_SIZE);
+            SWSS_LOG_NOTICE("[inserter] listening for %d packets...",  g.insertionWindowSize);
             start = std::chrono::steady_clock::now();
-            pcap_loop(handle, INSERTER_WINDOW_SIZE, bmt_parse_packet, (u_char *) &pkt_map);
+            pcap_loop(handle,  g.insertionWindowSize, bmt_parse_packet, (u_char *) &pkt_map);
             window_time = chrono::duration_cast<std::chrono::microseconds>(chrono::steady_clock::now() - start).count();
+            if (g.pauseCacheInsertion) {
+                continue;
+            }
             for(auto const &it_pkt : pkt_map) {
                 uint64_t bps = 1000000*it_pkt.second.second*PACKETS_PER_SAMPLE/window_time;
                 if (bps > cacheManager.get_insertion_thresh()){
@@ -511,8 +512,11 @@ int bmt_cache_inserter(void)
                     SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %u",saistatus);
                     if (saistatus != SAI_STATUS_SUCCESS) 
                         SWSS_LOG_ERROR("[inserter] can't add entry to vhost table");
+                    else
+                        g.cacheInsertCount++;
                 } else {
                     SWSS_LOG_NOTICE("[inserter] skipping flow insertion, bytes/sec %lu times in the window",bps);
+                    g.cacheInsertSkip++;
                 }
             }
         }
@@ -520,12 +524,14 @@ int bmt_cache_inserter(void)
     }
     /* deinit dpdk port trapping via acl*/
     SWSS_LOG_NOTICE("[inserter] DEBUG: dpdk listening done, deiniting:"); 
-    int rc = bmt_deinit_dpdk_traffic_sampler(sampler_init_status);
+    int rc = bmt_deinit_dpdk_traffic_sampler(g.sampler_init_status);
+    bmt_cache_debug_deinit();
     return(rc);
 
 }
 
 typedef pair<uint64_t,uint32_t>bmt_rule_evac_candidate_t; // bps,offset
+
 
 bmtCacheManager::bmtCacheManager(){
     lock_guard<mutex> guard(cacheMutex);
@@ -539,6 +545,18 @@ void bmtCacheManager::print_candidates(){
     lock_guard<mutex> guard(cacheMutex);
     for (auto it=evac_candidates.begin(); it!=evac_candidates.end(); it++){
         SWSS_LOG_INFO("[print evac candidates] bps: %lu , offset: %d", it->first,it->second);
+    }
+}
+void bmt_cache_remove_rule(uint32_t offset){
+    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    
+    SWSS_LOG_NOTICE( "[evac] INFO: cache evacuator freeing vhost table offset %d",offset);
+    sai_status_t status = gBmToRCacheOrch->RemoveTableVhost(vhost_table.entry[offset].entry_id);
+    if (status == SAI_STATUS_SUCCESS) {
+        vhost_table.entry[offset].valid = false;
+        vhost_table.free_offsets.push_back(offset);
+        if (countersTable)
+  		    countersTable->del(sai_serialize_object_id(vhost_table.entry[offset].entry_id));
     }
 }
 /** added to candidate list the entry cosest to bps from below */
@@ -582,7 +600,7 @@ uint64_t bmtCacheManager::get_eviction_thresh(){
 
 void bmt_flush_cache(){
     // TODO - protect from removal of non existing entry?
-    lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+    // lock_guard<mutex> guard(vhost_table.free_offset_mutex);
     for (uint32_t i=0 ; i<vhost_table.used_entries ; i++){
         if (vhost_table.entry[i].valid) {
             bmt_cache_remove_rule(i);
@@ -590,7 +608,10 @@ void bmt_flush_cache(){
     }
     vhost_table.used_entries = 0;
     vhost_table.free_offsets.clear();
-    gFlushCache = false;
+    g.flushCache = false;
+    g.cacheInsertCount = 0;
+    g.cacheInsertSkip = 0;
+    g.cacheRemoveCount = 0;
 }
 
 void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
@@ -598,10 +619,20 @@ void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
   *counter = 0;
   if (!vhost_table.entry[offset].valid) 
     return;
-  SWSS_LOG_NOTICE("reading vhost counter in offset %d", offset);
+  //SWSS_LOG_NOTICE("reading vhost counter in offset %d", offset);
   sai_status_t status = sai_bmtor_api->get_bmtor_stats(vhost_table.entry[offset].entry_id, 1, &counter_id, counter);
   if (status)
     *counter = 0;
+
+  vector<FieldValueTuple> fieldValues;
+  fieldValues.emplace_back("VNI", to_string(vhost_table.entry[offset].vni));
+  fieldValues.emplace_back("UNDERLAY_DIP", IpPrefix(htonl(vhost_table.entry[offset].underlay_dip), 32).to_string());
+  fieldValues.emplace_back("OVERLAY_DIP", IpPrefix(htonl(vhost_table.entry[offset].overlay_dip), 32).to_string());
+  fieldValues.emplace_back("BYTES", to_string(*counter));
+
+  if (countersTable)
+  	countersTable->set(sai_serialize_object_id(vhost_table.entry[offset].entry_id), fieldValues);
+  //SWSS_LOG_NOTICE("write counters to DB key 0x%lx", vhost_table.entry[offset].entry_id);
 }
 
 void bmt_cache_evacuator(){
@@ -613,9 +644,10 @@ void bmt_cache_evacuator(){
     uint32_t batch_start;
     uint32_t batch_end = 0;
 
-    while (!gExitFlag){
-        if (gFlushCache) 
+    while (!g.exitFlag) {
+        if (g.flushCache) {
             bmt_flush_cache();
+        }
         batch_start = batch_end % VHOST_TABLE_SIZE; 
         batch_end = min(batch_start + EVAC_BATCH_SIZE, (uint32_t) VHOST_TABLE_SIZE);
         // seperate loops for constant read interval time.
@@ -637,14 +669,32 @@ void bmt_cache_evacuator(){
                 SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
             }
         }
-    usleep(100000);
+        usleep(300000); // prevent busy wait
+    }
+}
+
+
+void bmt_cache_counters_read() {
+    while (!g.exitFlag) {
+        {
+            lock_guard<mutex> guard(vhost_table.free_offset_mutex);
+            //SWSS_LOG_NOTICE("reading counters from all entries");
+            for (uint32_t i=0; i<VHOST_TABLE_SIZE; i++) {
+                counter_read_by_offset(i, &g.entryCounters[i]);
+            }
+        }
+        sleep(1);
     }
 }
 
 void bmt_cache_start() {
-              thread t1_cache_inserter(bmt_cache_inserter);
-              thread t2_cache_evacuator(bmt_cache_evacuator);
-              t1_cache_inserter.detach();
-              t2_cache_evacuator.detach();
+    countersDb = new DBConnector(COUNTERS_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
+    countersTable = new Table(countersDb, "BMTOR");
+    thread t1_cache_inserter(bmt_cache_inserter);
+    thread t2_cache_evacuator(bmt_cache_evacuator);
+    thread t3_cache_counters_read(bmt_cache_counters_read);
+    t1_cache_inserter.detach();
+    t2_cache_evacuator.detach();
+    t3_cache_counters_read.detach();
 }
  

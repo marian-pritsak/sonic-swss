@@ -17,7 +17,7 @@ using namespace swss;
 #define MAX_MTU             9100
 #define VLAN_HLEN            4
 
-extern MacAddress gMacAddress;
+extern global_config_t g;
 
 VlanMgr::VlanMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, const vector<string> &tableNames) :
         Orch(cfgDb, tableNames),
@@ -73,7 +73,7 @@ bool VlanMgr::addHostVlan(int vlan_id)
     EXEC_WITH_ERROR_THROW(cmd.str(), res);
 
     cmd.str("");
-    cmd << IP_CMD << " link set " << VLAN_PREFIX << vlan_id << " address " << gMacAddress.to_string();
+    cmd << IP_CMD << " link set " << VLAN_PREFIX << vlan_id << " address " << g.macAddress.to_string();
     EXEC_WITH_ERROR_THROW(cmd.str(), res);
 
     // Bring up vlan port by default
@@ -176,7 +176,7 @@ bool VlanMgr::removeHostVlanMember(int vlan_id, const string &port_alias)
 
 bool VlanMgr::isVlanMacOk()
 {
-    return !!gMacAddress;
+    return !!g.macAddress;
 }
 
 void VlanMgr::doVlanTask(Consumer &consumer)

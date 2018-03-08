@@ -13,14 +13,7 @@
 
 using namespace swss;
 
-extern int gBatchSize;
-
-extern mutex gDbMutex;
-
-extern bool gSwssRecord;
-extern ofstream gRecordOfs;
-extern bool gLogRotate;
-extern string gRecordFile;
+extern global_config_t g;
 
 Orch::Orch(DBConnector *db, const string tableName)
 {
@@ -45,9 +38,9 @@ Orch::Orch(const vector<TableConnector>& tables)
 
 Orch::~Orch()
 {
-    if (gRecordOfs.is_open())
+    if (g.recordOfs.is_open())
     {
-        gRecordOfs.close();
+        g.recordOfs.close();
     }
 }
 
@@ -66,7 +59,7 @@ void Consumer::execute()
     SWSS_LOG_ENTER();
 
     // TODO: remove DbMutex when there is only single thread
-    lock_guard<mutex> lock(gDbMutex);
+    lock_guard<mutex> lock(g.dbMutex);
 
     std::deque<KeyOpFieldsValuesTuple> entries;
     getConsumerTable()->pops(entries);
@@ -83,7 +76,7 @@ void Consumer::execute()
         string op  = kfvOp(entry);
 
         /* Record incoming tasks */
-        if (gSwssRecord)
+        if (g.swssRecord)
         {
             Orch::recordTuple(*this, entry);
         }
@@ -227,7 +220,7 @@ void Orch::doTask()
 
 void Orch::logfileReopen()
 {
-    gRecordOfs.close();
+    g.recordOfs.close();
 
     /*
      * On log rotate we will use the same file name, we are assuming that
@@ -235,11 +228,11 @@ void Orch::logfileReopen()
      * empty file here.
      */
 
-    gRecordOfs.open(gRecordFile);
+    g.recordOfs.open(g.recordFile);
 
-    if (!gRecordOfs.is_open())
+    if (!g.recordOfs.is_open())
     {
-        SWSS_LOG_ERROR("failed to open gRecordOfs file %s: %s", gRecordFile.c_str(), strerror(errno));
+        SWSS_LOG_ERROR("failed to open g.recordOfs file %s: %s", g.recordFile.c_str(), strerror(errno));
         return;
     }
 }
@@ -253,11 +246,11 @@ void Orch::recordTuple(Consumer &consumer, KeyOpFieldsValuesTuple &tuple)
         s += "|" + fvField(*i) + ":" + fvValue(*i);
     }
 
-    gRecordOfs << getTimestamp() << "|" << s << endl;
+    g.recordOfs << getTimestamp() << "|" << s << endl;
 
-    if (gLogRotate)
+    if (g.logRotate)
     {
-        gLogRotate = false;
+        g.logRotate = false;
 
         logfileReopen();
     }
@@ -364,7 +357,7 @@ void Orch::addConsumer(DBConnector *db, string tableName)
     }
     else
     {
-        addExecutor(tableName, new Consumer(new ConsumerStateTable(db, tableName, gBatchSize), this));
+        addExecutor(tableName, new Consumer(new ConsumerStateTable(db, tableName, g.batchSize), this));
     }
 }
 
