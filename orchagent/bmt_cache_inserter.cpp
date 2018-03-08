@@ -105,7 +105,7 @@ extern bool gExitFlag;
 bmtCacheManager cacheManager;
 
 sai_status_t bmt_get_free_offset(uint32_t &offset){
-    if (vhost_table.used_entries > (VHOST_TABLE_SIZE-1)){
+    if (vhost_table.used_entries == (VHOST_TABLE_SIZE-1)){
         //TODO take from free list when cache evac is working.
         if (vhost_table.free_offsets.size()>0){
             offset = vhost_table.free_offsets.back();
@@ -130,7 +130,7 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
     sai_status_t status = bmt_get_free_offset(offset);
     if (status != SAI_STATUS_SUCCESS) 
         return status;
-    SWSS_LOG_NOTICE("Vhost Enry creation. underlay dip 0x%x overlay_dip 0x%x. vni %d", underlay_dip, overlay_dip, vni);
+    SWSS_LOG_NOTICE("Vhost Entry creation. underlay dip 0x%x overlay_dip 0x%x. vni %d", underlay_dip, overlay_dip, vni);
     sai_object_id_t entry_id;
     status = gBmToRCacheOrch->CreateVhostEntry(&entry_id, IpAddress(htonl(underlay_dip)), IpAddress(htonl(overlay_dip)), vni);
     if (status != SAI_STATUS_SUCCESS){
@@ -139,7 +139,7 @@ sai_status_t bmt_cache_insert_vhost_entry(uint32_t overlay_dip, uint32_t underla
         
     }
 
-    if (vhost_table.used_entries > (VHOST_TABLE_SIZE-1)){
+    if (vhost_table.used_entries == (VHOST_TABLE_SIZE-1)){
         vhost_table.free_offsets.pop_back();
     } else {
         vhost_table.used_entries++;
@@ -499,11 +499,11 @@ int bmt_cache_inserter(void)
                 uint64_t bps = 1000000*it_pkt.second.second*PACKETS_PER_SAMPLE/window_time;
                 if (bps > cacheManager.get_insertion_thresh()){
                     SWSS_LOG_NOTICE("[inserter] flow insertion, bytes/sec %lu times in the window",bps);
-                    if(vhost_table.free_offsets.size()<CACHE_EVAC_SIZE){
+                    if(vhost_table.free_offsets.size()<CACHE_EVAC_SIZE && vhost_table.used_entries==(VHOST_TABLE_SIZE-1)){
                         saistatus = cacheManager.consume_candidate(bps, offset);
                         if (saistatus != SAI_STATUS_SUCCESS) 
                             SWSS_LOG_ERROR("[inserter] ERROR: consume_candidate failed, bytes/sec %lu.",bps);
-                        saistatus = bmt_cache_remove_rule(offset);
+                        saistatus = bmt_cache_remove_rule(offset); // TODO move to consume rule
                         if (saistatus != SAI_STATUS_SUCCESS) 
                             SWSS_LOG_ERROR("[inserter] ERROR: cant remove rule, offset %d",offset);
                     }
@@ -569,12 +569,13 @@ void bmtCacheManager::insert_candidate(uint64_t bps,uint32_t offset){
     }
 }
 uint64_t bmtCacheManager::get_insertion_thresh(){
-    if (evac_candidates.size()>0)
+    // todo mybe better to save the value of the last one consumed and not the current.
+    if (evac_candidates.size()>0 && vhost_table.used_entries == (VHOST_TABLE_SIZE-1))
         return evac_candidates.back().first; //lowest bps in candidates
-    return UINT64_MAX; // prevent insertion if no candidates are avaliable
+    return INSERTER_THRESH_MIN; // insert any if no candidates are avaliable
 }
 uint64_t bmtCacheManager::get_eviction_thresh(){
-    if (evac_candidates.size()>0)
+    if (evac_candidates.size() == CACHE_EVAC_SIZE)
         return evac_candidates.back().first;//highest bps in candidates
     return UINT64_MAX;
 }
