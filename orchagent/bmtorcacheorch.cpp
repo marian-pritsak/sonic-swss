@@ -267,6 +267,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         string overlay_prefix_str(keys[1]);
         string op = kfvOp(it->second);
         string underlay_dest_ip_str;
+        string underlay_src_ip_str;
         string vni_str;
 
         for (auto i : kfvFieldsValues(it->second)) {
@@ -274,6 +275,8 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                 vni_str = fvValue(i);
             if (fvField(i) == "underlay_dest_ip")
                 underlay_dest_ip_str = fvValue(i);
+            if (fvField(i) == "underlay_src_ip")
+                underlay_src_ip_str = fvValue(i);
         }
 
         IpAddress underlay_dest_ip(underlay_dest_ip_str);
@@ -288,8 +291,8 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
 
             SWSS_LOG_NOTICE("**************************************************pre_create_tunnel");
             //XXX Make configurable
-            IpAddress src_ip("1.1.1.2");
-            status = create_tunnel(src_ip, vni);
+            IpAddress underlay_src_ip(underlay_src_ip_str);
+            status = create_tunnel(underlay_src_ip, vni);
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to create tunnel");
                 throw "BMToR vhost create tunnel failure";
