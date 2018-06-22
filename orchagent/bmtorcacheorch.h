@@ -28,6 +28,7 @@ private:
     void doVnetTask(Consumer &consumer);
     void doVnetIntfTask(Consumer &consumer);
     void doVxlanTunnelTask(Consumer &consumer);
+    void doEncapTunnelTask(Consumer &consumer);
     void doTask(Consumer &consumer);
     sai_object_id_t gTunnelId;
     sai_object_id_t default1Qbridge;

@@ -350,7 +350,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    bmt_cache_start();
+    //bmt_cache_start();
 
     try
     {
