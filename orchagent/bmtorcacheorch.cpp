@@ -289,8 +289,6 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                     underlay_dest_ip_str.c_str(),
                     htonl(underlay_dest_ip.getIp().ip_addr.ipv4_addr));
 
-            SWSS_LOG_NOTICE("**************************************************pre_create_tunnel");
-            //XXX Make configurable
             IpAddress underlay_src_ip(underlay_src_ip_str);
             status = create_tunnel(underlay_src_ip, vni);
             if (status != SAI_STATUS_SUCCESS) {
@@ -298,15 +296,12 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                 throw "BMToR vhost create tunnel failure";
             }
 
-            SWSS_LOG_NOTICE("**************************************************create_tunnel");
-
             status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), vni); 
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to add table_vhost entry");
                 throw "BMToR vhost entry addition failure";
             }
 
-            SWSS_LOG_NOTICE("**************************************************create_vhost_entry");
             setVhostEntry(kfvKey(it->second) + "/32", vhost_entry);
 
         } else if (op == DEL_COMMAND) {
