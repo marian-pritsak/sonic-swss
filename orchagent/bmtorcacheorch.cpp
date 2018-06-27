@@ -357,13 +357,13 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
     string vnet_name;
     vector<string> keys = tokenize(kfvKey(it->second), ':');
     string if_name = keys[0];
-    string bm_ip_prefix_str = keys[1];
+    /* string bm_ip_prefix_str = keys[1]; */
     for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "vnet_name" || fvField(i) == "vrf_name")
                 vnet_name = fvValue(i);
         }
     sai_object_id_t port_id = sai_get_port_id_by_alias(if_name);
-    SWSS_LOG_NOTICE("Vnet name %s, ifname %s,port_oid 0x%lx ipprefix %s", vnet_name.c_str(), if_name.c_str(), port_id, bm_ip_prefix_str.c_str());
+    SWSS_LOG_NOTICE("Vnet name %s, ifname %s,port_oid 0x%lx", vnet_name.c_str(), if_name.c_str(), port_id);
     if (op == SET_COMMAND) {
         sai_status_t status;
         sai_attribute_t pvid_attr;
