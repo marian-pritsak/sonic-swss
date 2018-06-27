@@ -66,6 +66,7 @@ bool OrchDaemon::init()
         "VNET_ROUTE_TABLE",
         "VNET",         //TODO: ConfigDB
         "VNET_INTF",    //TODO: ConfigDB
+        "VRF_INTF",    //TODO: ConfigDB
         "VXLAN_TUNNEL",  //TODO: ConfigDB
         "ENCAP_TUNNEL_TABLE"
     };

@@ -96,30 +96,30 @@ void BmToRCacheOrch::InitDefaultEntries() {
       throw "BMToR initialization failure";
   }
 
-  sai_attribute_t vhost_table_entry_attr[8];
-  vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
-  vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT;
-  vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID;
-  vhost_table_entry_attr[1].value.oid = dpdk_port;
-  vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT;
-  vhost_table_entry_attr[2].value.booldata = true;
+  /* sai_attribute_t vhost_table_entry_attr[8]; */
+  /* vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION; */
+  /* vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_PORT; */
+  /* vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PORT_ID; */
+  /* vhost_table_entry_attr[1].value.oid = dpdk_port; */
+  /* vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_IS_DEFAULT; */
+  /* vhost_table_entry_attr[2].value.booldata = true; */
 
-  // Patch. TODO: need to add condition in header - and remove this
-  vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; 
-  vhost_table_entry_attr[3].value.u32 = 0;
-  vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
-  vhost_table_entry_attr[4].value.u32 = 0;
-  vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
-  vhost_table_entry_attr[5].value.u32 = 0;
-  vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
-  vhost_table_entry_attr[6].value.u32 = 0;
-  sai_object_id_t default_vhost_table_entry;
-  status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr);
-  if (status != SAI_STATUS_SUCCESS) {
-      SWSS_LOG_ERROR("Failed to create table_vhost default entry");
-      throw "BMToR initialization failure";
-  }
-  setVhostEntry("default", default_vhost_table_entry);
+  /* // Patch. TODO: need to add condition in header - and remove this */
+  /* vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY; */ 
+  /* vhost_table_entry_attr[3].value.u32 = 0; */
+  /* vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY; */
+  /* vhost_table_entry_attr[4].value.u32 = 0; */
+  /* vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK; */
+  /* vhost_table_entry_attr[5].value.u32 = 0; */
+  /* vhost_table_entry_attr[6].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP; */
+  /* vhost_table_entry_attr[6].value.u32 = 0; */
+  /* sai_object_id_t default_vhost_table_entry; */
+  /* status = sai_bmtor_api->create_table_vhost_entry(&default_vhost_table_entry, gSwitchId, 7, vhost_table_entry_attr); */
+  /* if (status != SAI_STATUS_SUCCESS) { */
+  /*     SWSS_LOG_ERROR("Failed to create table_vhost default entry"); */
+  /*     throw "BMToR initialization failure"; */
+  /* } */
+  /* setVhostEntry("default", default_vhost_table_entry); */
 }
 
 sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
@@ -238,7 +238,7 @@ void BmToRCacheOrch::doTask(Consumer &consumer)
       doVnetRouteTask(consumer);
     } else if (table_name == "VNET") {
       doVnetTask(consumer);
-    } else if (table_name == "VNET_INTF") {
+    } else if (table_name == "VNET_INTF" || table_name == "VRF_INTF") {
       doVnetIntfTask(consumer);
     } else if (table_name == "VXLAN_TUNNEL") {
       doVxlanTunnelTask(consumer);
@@ -260,7 +260,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         }
 
         InitDefaultEntries();  //TODO - this should move to some init
-        create_dpdk_bridge_port(); //TODO - this should move to some init
+        //create_dpdk_bridge_port(); //TODO - this should move to some init
 
         sai_object_id_t vhost_entry;
         string vrf_name(keys[0]);
@@ -280,7 +280,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         }
 
         IpAddress underlay_dest_ip(underlay_dest_ip_str);
-        IpAddress overlay_prefix(overlay_prefix_str);
+        IpPrefix overlay_prefix(overlay_prefix_str);
         uint32_t vni = stoi(vni_str);
 
         if (op == SET_COMMAND) {
@@ -359,7 +359,7 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
     string if_name = keys[0];
     string bm_ip_prefix_str = keys[1];
     for (auto i : kfvFieldsValues(it->second)) {
-            if (fvField(i) == "vnet_name")
+            if (fvField(i) == "vnet_name" || fvField(i) == "vrf_name")
                 vnet_name = fvValue(i);
         }
     sai_object_id_t port_id = sai_get_port_id_by_alias(if_name);
