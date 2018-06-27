@@ -122,41 +122,26 @@ void BmToRCacheOrch::InitDefaultEntries() {
   /* setVhostEntry("default", default_vhost_table_entry); */
 }
 
-sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
+sai_status_t BmToRCacheOrch::getBridgeMapEntryByVni(uint32_t vni, sai_object_id_t& bridgeId, sai_object_id_t& mapEntry)
+{
   SWSS_LOG_ENTER();
   // Create bridge, tunnel and tunnel maps
-  sai_status_t status;
+  sai_status_t status = SAI_STATUS_SUCCESS;
+
+  sai_object_id_t bridge;
+
+  if (vniToBridgeMap.find(vni) != vniToBridgeMap.end())
+  {
+      bridgeId = vniToBridgeMap[vni].first;
+      mapEntry = vniToBridgeMap[vni].second;
+      return status;
+  }
 
   sai_attribute_t bridge_attr[1];
   bridge_attr[0].id = SAI_BRIDGE_ATTR_TYPE;
   bridge_attr[0].value.s32 = SAI_BRIDGE_TYPE_1D;
-  status = sai_bridge_api->create_bridge(&gBridgeId, gSwitchId, 1, bridge_attr);
-  printf("create_bridge. status = %d\n", status);
-  if (status != SAI_STATUS_SUCCESS)
-    return status;
-
-  sai_attribute_t tunnel_map_attr[2];
-  sai_object_id_t tunnel_encap_map;
-  sai_object_id_t tunnel_decap_map;
-  sai_object_id_t tunnel_encap_map_entry;
-  sai_object_id_t tunnel_term_table_entry;
-  tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
-  tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_BRIDGE_IF_TO_VNI;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
-  tunnel_map_attr[1].value.tunnelmap.list = NULL;
-  status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
-  SWSS_LOG_NOTICE("create_tunnel_map (encap). status = %d\n", status);
-  if (status != SAI_STATUS_SUCCESS)
-    return status;
-
-  tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
-  tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_BRIDGE_IF;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
-  tunnel_map_attr[1].value.tunnelmap.list = NULL;
-  status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
-  SWSS_LOG_NOTICE("create_tunnel_map (decap). status = %d\n", status);
+  status = sai_bridge_api->create_bridge(&bridge, gSwitchId, 1, bridge_attr);
+  SWSS_LOG_NOTICE("create_bridge. status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
 
@@ -168,9 +153,54 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
   tunnel_map_entry_attr[2].id = SAI_TUNNEL_MAP_ENTRY_ATTR_VNI_ID_VALUE;
   tunnel_map_entry_attr[2].value.u32 = vni;
   tunnel_map_entry_attr[3].id = SAI_TUNNEL_MAP_ENTRY_ATTR_BRIDGE_ID_KEY;
-  tunnel_map_entry_attr[3].value.oid = gBridgeId;
-  status = sai_tunnel_api->create_tunnel_map_entry(&tunnel_encap_map_entry, gSwitchId, 4, tunnel_map_entry_attr);
+  tunnel_map_entry_attr[3].value.oid = bridge;
+  status = sai_tunnel_api->create_tunnel_map_entry(&mapEntry, gSwitchId, 4, tunnel_map_entry_attr);
   SWSS_LOG_NOTICE("create_tunnel_map_entry (encap). status = %d\n", status);
+  if (status != SAI_STATUS_SUCCESS)
+    return status;
+
+  bridgeId = bridge;
+
+  vniToBridgeMap.emplace(make_pair(vni, make_pair(bridgeId, mapEntry)));
+
+  return status;
+
+}
+
+sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
+  SWSS_LOG_ENTER();
+  // Create bridge, tunnel and tunnel maps
+  sai_status_t status;
+
+  sai_object_id_t bridgeId, mapEntry;
+
+  sai_attribute_t tunnel_map_attr[2];
+  sai_object_id_t tunnel_decap_map;
+  sai_object_id_t tunnel_term_table_entry;
+  tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
+  tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_BRIDGE_IF_TO_VNI;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
+  tunnel_map_attr[1].value.tunnelmap.count = 0;
+  tunnel_map_attr[1].value.tunnelmap.list = NULL;
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
+  SWSS_LOG_NOTICE("create_tunnel_map (encap). status = %d\n", status);
+  if (status != SAI_STATUS_SUCCESS)
+    return status;
+
+
+  // XXX We only support one vni for now (bug in SAI)
+  status = getBridgeMapEntryByVni(vni, bridgeId, mapEntry);
+  SWSS_LOG_NOTICE("getBridgeMapEntryByVni status = %d\n", status);
+  if (status != SAI_STATUS_SUCCESS)
+    return status;
+
+  tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
+  tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_BRIDGE_IF;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
+  tunnel_map_attr[1].value.tunnelmap.count = 0;
+  tunnel_map_attr[1].value.tunnelmap.list = NULL;
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
+  SWSS_LOG_NOTICE("create_tunnel_map (decap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
 
@@ -268,11 +298,8 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         string op = kfvOp(it->second);
         string underlay_dest_ip_str;
         string underlay_src_ip_str;
-        string vni_str;
 
         for (auto i : kfvFieldsValues(it->second)) {
-            if (fvField(i) == "vni")
-                vni_str = fvValue(i);
             if (fvField(i) == "underlay_dest_ip")
                 underlay_dest_ip_str = fvValue(i);
             if (fvField(i) == "underlay_src_ip")
@@ -281,7 +308,6 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
 
         IpAddress underlay_dest_ip(underlay_dest_ip_str);
         IpPrefix overlay_prefix(overlay_prefix_str);
-        uint32_t vni = stoi(vni_str);
 
         if (op == SET_COMMAND) {
             SWSS_LOG_NOTICE("create ENCAP_TUNNEL_TABLE vrf %s. enpoint %s. underlay_dip 0x%x",
@@ -289,14 +315,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                     underlay_dest_ip_str.c_str(),
                     htonl(underlay_dest_ip.getIp().ip_addr.ipv4_addr));
 
-            IpAddress underlay_src_ip(underlay_src_ip_str);
-            status = create_tunnel(underlay_src_ip, vni);
-            if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to create tunnel");
-                throw "BMToR vhost create tunnel failure";
-            }
-
-            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), vni); 
+            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), gVni); 
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to add table_vhost entry");
                 throw "BMToR vhost entry addition failure";
@@ -342,7 +361,7 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
     if (op == SET_COMMAND) {
       IpAddress src_ip;
       getTunnelIP(vxlan_tunnel, src_ip);
-      create_tunnel(src_ip, vni);
+      /* create_tunnel(src_ip); */
     }
     it = consumer.m_toSync.erase(it);
   }
@@ -390,20 +409,33 @@ void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
 
   auto it = consumer.m_toSync.begin();
   while (it != consumer.m_toSync.end()) {
-    InitDefaultEntries();  //TODO - this should move to some init
-    create_dpdk_bridge_port(); //TODO - this should move to some init
+    /* InitDefaultEntries();  //TODO - this should move to some init */
+    /* create_dpdk_bridge_port(); //TODO - this should move to some init */
     string op = kfvOp(it->second);
     string key = kfvKey(it->second);
     string src_ip_str;
+    string vni_str;
+
     for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "src_ip")
                 src_ip_str = fvValue(i);
+            if (fvField(i) == "vni")
+                vni_str = fvValue(i);
         }
     IpAddress src_ip(src_ip_str);
-    SWSS_LOG_NOTICE("tunnel name %s. src_ip_str %s, ip 0x%x", key.c_str(), src_ip_str.c_str(), ntohl(src_ip.getIp().ip_addr.ipv4_addr));
-    if (op == SET_COMMAND) {
-      setTunnelIP(key, src_ip);
+    gVni = stoi(vni_str);
+
+    // XXX We only support one vni for now (bug in SAI)
+    sai_status_t status = create_tunnel(src_ip, gVni);
+    if (status != SAI_STATUS_SUCCESS) {
+        SWSS_LOG_ERROR("Failed to create tunnel");
+        throw "BMToR vhost create tunnel failure";
     }
+
+    /* SWSS_LOG_NOTICE("tunnel name %s. src_ip_str %s, ip 0x%x", key.c_str(), src_ip_str.c_str(), ntohl(src_ip.getIp().ip_addr.ipv4_addr)); */
+    /* if (op == SET_COMMAND) { */
+    /*   setTunnelIP(key, src_ip); */
+    /* } */
     it = consumer.m_toSync.erase(it);
   }
 }
@@ -486,8 +518,18 @@ sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddre
   SWSS_LOG_ENTER();
   sai_attribute_t vhost_table_entry_attr[8];
   uint16_t vnet_bitmap = GetVnetBitmap(vni);
+  sai_object_id_t bridgeId, mapEntry;
+
   std::string key = "Vnet_" + to_string(vni) + ":" +  overlay_dip.to_string() + "/32";
   SWSS_LOG_NOTICE("[debug] Looking up key %s", key.c_str());
+
+  sai_status_t status = getBridgeMapEntryByVni(vni, bridgeId, mapEntry);
+  if (status != SAI_STATUS_SUCCESS)
+  {
+      SWSS_LOG_ERROR("Failed to get bridge and map entry for vni %d", vni);
+      return status;
+  }
+
   if (getVhostEntry(key, *entry_id)) {
     SWSS_LOG_NOTICE("Tried to insert an existing entry. returns existing entry");
     return SAI_STATUS_FAILURE;
@@ -512,8 +554,8 @@ sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddre
   vhost_table_entry_attr[6].value.ipaddr.addr.ip4 = underlay_dip.getIp().ip_addr.ipv4_addr;
   vhost_table_entry_attr[6].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
   vhost_table_entry_attr[7].id = SAI_TABLE_VHOST_ENTRY_ATTR_BRIDGE_ID;
-  vhost_table_entry_attr[7].value.oid = gBridgeId;
-  sai_status_t status = sai_bmtor_api->create_table_vhost_entry(entry_id, gSwitchId, 8, vhost_table_entry_attr);
+  vhost_table_entry_attr[7].value.oid = bridgeId;
+  status = sai_bmtor_api->create_table_vhost_entry(entry_id, gSwitchId, 8, vhost_table_entry_attr);
   if (status == SAI_STATUS_SUCCESS) {
     used_offsets[*entry_id] = offset;
     setVhostEntry(key, *entry_id);

@@ -21,6 +21,7 @@ public:
     sai_object_id_t GetTunnelID();
     sai_status_t CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni);
     sai_status_t RemoveTableVhost(sai_object_id_t entry_id);
+    sai_status_t getBridgeMapEntryByVni(uint32_t vni, sai_object_id_t& bridgeId, sai_object_id_t& mapEntry);
 private:
     void InitDefaultEntries();
     void doVnetRouteTunnelTask(Consumer &consumer);
@@ -42,8 +43,7 @@ private:
     sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
     IpAddress gTunnelSrcIp;;
     uint16_t gVlansStart;
-    // uint32_t gVNI;
-    sai_object_id_t gBridgeId;// TODO remove
+    uint32_t gVni;
     uint16_t gDPDKVlan;
     uint16_t gVnetBitmap;
     map<std::string, sai_object_id_t> vhost_entries;
@@ -66,6 +66,8 @@ private:
     std::map<sai_object_id_t, uint32_t> used_offsets;
     uint16_t get_vid_from_vlan(sai_object_id_t vlan_oid);
     uint32_t gVhostTableSize;
+    map<uint32_t, pair<sai_object_id_t, sai_object_id_t>> vniToBridgeMap;
+    sai_object_id_t tunnel_encap_map;
 };
 
 #endif /* SWSS_BMTOR_CACHE_ORCH_H */
