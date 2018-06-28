@@ -24,6 +24,7 @@ extern sai_vlan_api_t*                 sai_vlan_api;
 
 extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
+#define NUM_OF_VNI 32
 
 BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
@@ -167,7 +168,7 @@ sai_status_t BmToRCacheOrch::getBridgeMapEntryByVni(uint32_t vni, sai_object_id_
 
 }
 
-sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
+sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
   SWSS_LOG_ENTER();
   // Create bridge, tunnel and tunnel maps
   sai_status_t status;
@@ -188,11 +189,13 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip, uint32_t vni) {
     return status;
 
 
-  // XXX We only support one vni for now (bug in SAI)
-  status = getBridgeMapEntryByVni(vni, bridgeId, mapEntry);
-  SWSS_LOG_NOTICE("getBridgeMapEntryByVni status = %d\n", status);
-  if (status != SAI_STATUS_SUCCESS)
-    return status;
+  // XXX We only support pre-made vnis for now (bug in SAI)
+  for (uint32_t vni = 1; vni < 1 + NUM_OF_VNI; vni++) {
+        status = getBridgeMapEntryByVni(vni, bridgeId, mapEntry);
+        if (status != SAI_STATUS_SUCCESS)
+                return status;
+  }
+  SWSS_LOG_NOTICE("Successfully created %d bridges and Vnis\n", NUM_OF_VNI);
 
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_BRIDGE_IF;
@@ -298,16 +301,20 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         string op = kfvOp(it->second);
         string underlay_dest_ip_str;
         string underlay_src_ip_str;
+        string vni_str;
 
         for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "underlay_dest_ip")
                 underlay_dest_ip_str = fvValue(i);
             if (fvField(i) == "underlay_src_ip")
                 underlay_src_ip_str = fvValue(i);
+            if (fvField(i) == "vni")
+                vni_str = fvValue(i);
         }
 
         IpAddress underlay_dest_ip(underlay_dest_ip_str);
         IpPrefix overlay_prefix(overlay_prefix_str);
+        uint32_t vni = stoi(vni_str);
 
         if (op == SET_COMMAND) {
             SWSS_LOG_NOTICE("create ENCAP_TUNNEL_TABLE vrf %s. enpoint %s. underlay_dip 0x%x",
@@ -315,7 +322,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                     underlay_dest_ip_str.c_str(),
                     htonl(underlay_dest_ip.getIp().ip_addr.ipv4_addr));
 
-            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), gVni); 
+            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), vni); 
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to add table_vhost entry");
                 throw "BMToR vhost entry addition failure";
@@ -414,19 +421,14 @@ void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
     string op = kfvOp(it->second);
     string key = kfvKey(it->second);
     string src_ip_str;
-    string vni_str;
 
     for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "src_ip")
                 src_ip_str = fvValue(i);
-            if (fvField(i) == "vni")
-                vni_str = fvValue(i);
         }
     IpAddress src_ip(src_ip_str);
-    gVni = stoi(vni_str);
 
-    // XXX We only support one vni for now (bug in SAI)
-    sai_status_t status = create_tunnel(src_ip, gVni);
+    sai_status_t status = create_tunnel(src_ip);
     if (status != SAI_STATUS_SUCCESS) {
         SWSS_LOG_ERROR("Failed to create tunnel");
         throw "BMToR vhost create tunnel failure";

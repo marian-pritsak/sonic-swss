@@ -38,7 +38,7 @@ private:
     sai_object_id_t dpdk_port;
     sai_object_id_t bm_port_oid;
     sai_object_id_t peering_entry;
-    sai_status_t create_tunnel(IpAddress src_ip, uint32_t vni);
+    sai_status_t create_tunnel(IpAddress src_ip);
     sai_object_id_t sai_get_port_id_by_alias(std::string alias);
     sai_object_id_t sai_get_port_id_by_front_port(uint32_t hw_port);
     IpAddress gTunnelSrcIp;;
