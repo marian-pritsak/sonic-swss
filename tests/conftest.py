@@ -1,10 +1,19 @@
 import os
+import os.path
 import re
 import time
 import docker
 import pytest
 import commands
+import tarfile
+import StringIO
+import subprocess
 from swsscommon import swsscommon
+
+def ensure_system(cmd):
+    rc = os.WEXITSTATUS(os.system(cmd))
+    if rc:
+        raise RuntimeError('Failed to run command: %s' % cmd)
 
 def pytest_addoption(parser):
     parser.addoption("--dvsname", action="store", default=None,
@@ -50,14 +59,25 @@ class AsicDbValidator(object):
         atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_TABLE")
         keys = atbl.getKeys()
 
-        assert len(keys) == 1
-        self.default_acl_table = keys[0]
+        assert len(keys) >= 1
+        self.default_acl_tables = keys
 
         atbl = swsscommon.Table(self.adb, "ASIC_STATE:SAI_OBJECT_TYPE_ACL_ENTRY")
         keys = atbl.getKeys()
 
         assert len(keys) == 2
         self.default_acl_entries = keys
+
+class ApplDbValidator(object):
+    def __init__(self, dvs):
+        appl_db = swsscommon.DBConnector(swsscommon.APPL_DB, dvs.redis_sock, 0)
+        self.neighTbl = swsscommon.Table(appl_db, "NEIGH_TABLE")
+
+    def __del__(self):
+        # Make sure no neighbors on vEthernet
+        keys = self.neighTbl.getKeys();
+        for key in keys:
+            assert not key.startswith("vEthernet")
 
 class VirtualServer(object):
     def __init__(self, ctn_name, pid, i):
@@ -69,26 +89,39 @@ class VirtualServer(object):
         if os.path.exists("/var/run/netns/%s" % self.nsname):
             self.cleanup = False
         else:
-            os.system("ip netns add %s" % self.nsname)
+            ensure_system("ip netns add %s" % self.nsname)
 
             # create vpeer link
-            os.system("ip link add %s type veth peer name %s" % (self.nsname[0:12], self.vifname))
-            os.system("ip link set %s netns %s" % (self.nsname[0:12], self.nsname))
-            os.system("ip link set %s netns %d" % (self.vifname, pid))
+            ensure_system("ip link add %s type veth peer name %s" % (self.nsname[0:12], self.vifname))
+            ensure_system("ip link set %s netns %s" % (self.nsname[0:12], self.nsname))
+            ensure_system("ip link set %s netns %d" % (self.vifname, pid))
 
             # bring up link in the virtual server
-            os.system("ip netns exec %s ip link set dev %s name eth0" % (self.nsname, self.nsname[0:12]))
-            os.system("ip netns exec %s ip link set dev eth0 up" % (self.nsname))
+            ensure_system("ip netns exec %s ip link set dev %s name eth0" % (self.nsname, self.nsname[0:12]))
+            ensure_system("ip netns exec %s ip link set dev eth0 up" % (self.nsname))
+            ensure_system("ip netns exec %s ethtool -K eth0 tx off" % (self.nsname))
 
             # bring up link in the virtual switch
-            os.system("nsenter -t %d -n ip link set dev %s up" % (pid, self.vifname))
+            ensure_system("nsenter -t %d -n ip link set dev %s up" % (pid, self.vifname))
+
+        # disable arp, so no neigh on vEthernet(s)
+        # Note: outside the if-else, so existing VS container could be fixed
+        ensure_system("nsenter -t %d -n ip link set arp off dev %s" % (pid, self.vifname))
 
     def __del__(self):
         if self.cleanup:
+            pids = subprocess.check_output("ip netns pids %s" % (self.nsname), shell=True)
+            if pids:
+                for pid in pids.split('\n'):
+                    if len(pid) > 0:
+                        os.system("kill %s" % int(pid))
             os.system("ip netns delete %s" % self.nsname)
 
     def runcmd(self, cmd):
         os.system("ip netns exec %s %s" % (self.nsname, cmd))
+
+    def runcmd_async(self, cmd):
+        return subprocess.Popen("ip netns exec %s %s" % (self.nsname, cmd), shell=True)
 
 class DockerVirtualSwitch(object):
     def __init__(self, name=None):
@@ -125,7 +158,7 @@ class DockerVirtualSwitch(object):
             for ctn in self.client.containers.list():
                 if ctn.id == ctn_sw_id or ctn.name == ctn_sw_id:
                     ctn_sw_name = ctn.name
-           
+
             (status, output) = commands.getstatusoutput("docker inspect --format '{{.State.Pid}}' %s" % ctn_sw_name)
             self.ctn_sw_pid = int(output)
 
@@ -153,10 +186,17 @@ class DockerVirtualSwitch(object):
                     network_mode="container:%s" % self.ctn_sw.name,
                     volumes={ self.mount: { 'bind': '/var/run/redis', 'mode': 'rw' } })
 
-        self.check_ready()
-        self.init_asicdb_validator()
+        try:
+            self.ctn.exec_run("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
+            self.check_ready()
+            self.init_asicdb_validator()
+            self.appldb = ApplDbValidator(self)
+        except:
+            self.destroy()
+            raise
 
     def destroy(self):
+        del self.appldb
         if self.cleanup:
             self.ctn.remove(force=True)
             self.ctn_sw.remove(force=True)
@@ -172,7 +212,11 @@ class DockerVirtualSwitch(object):
         started = 0
         while True:
             # get process status
-            out = self.ctn.exec_run("supervisorctl status")
+            res = self.ctn.exec_run("supervisorctl status")
+            try:
+                out = res.output
+            except AttributeError:
+                out = res
             for l in out.split('\n'):
                 fds = re_space.split(l)
                 if len(fds) < 2:
@@ -204,7 +248,23 @@ class DockerVirtualSwitch(object):
         self.asicdb = AsicDbValidator(self)
 
     def runcmd(self, cmd):
-        return self.ctn.exec_run(cmd)
+        res = self.ctn.exec_run(cmd)
+        try:
+            exitcode = res.exit_code
+            out = res.output
+        except AttributeError:
+            exitcode = 0
+            out = res
+        return (exitcode, out)
+
+    def copy_file(self, path, filename):
+        tarstr = StringIO.StringIO()
+        tar = tarfile.open(fileobj=tarstr, mode="w")
+        tar.add(filename, os.path.basename(filename))
+        tar.close()
+        self.ctn.exec_run("mkdir -p %s" % path)
+        self.ctn.put_archive(path, tarstr.getvalue())
+        tarstr.close()
 
 @pytest.yield_fixture(scope="module")
 def dvs(request):

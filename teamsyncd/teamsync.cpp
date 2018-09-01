@@ -20,7 +20,7 @@ TeamSync::TeamSync(DBConnector *db, DBConnector *stateDb, Select *select) :
     m_select(select),
     m_lagTable(db, APP_LAG_TABLE_NAME),
     m_lagMemberTable(db, APP_LAG_MEMBER_TABLE_NAME),
-    m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME, CONFIGDB_TABLE_NAME_SEPARATOR)
+    m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME)
 {
 }
 
@@ -45,25 +45,22 @@ void TeamSync::onMsg(int nlmsg_type, struct nl_object *obj)
 
     addLag(lagName, rtnl_link_get_ifindex(link),
            rtnl_link_get_flags(link) & IFF_UP,
-           rtnl_link_get_flags(link) & IFF_LOWER_UP,
-           rtnl_link_get_mtu(link));
+           rtnl_link_get_flags(link) & IFF_LOWER_UP);
 }
 
 void TeamSync::addLag(const string &lagName, int ifindex, bool admin_state,
-                      bool oper_state, unsigned int mtu)
+                      bool oper_state)
 {
     /* Set the LAG */
     std::vector<FieldValueTuple> fvVector;
     FieldValueTuple a("admin_status", admin_state ? "up" : "down");
     FieldValueTuple o("oper_status", oper_state ? "up" : "down");
-    FieldValueTuple m("mtu", to_string(mtu));
     fvVector.push_back(a);
     fvVector.push_back(o);
-    fvVector.push_back(m);
     m_lagTable.set(lagName, fvVector);
 
-    SWSS_LOG_INFO("Add %s admin_status:%s oper_status:%s mtu:%d",
-                   lagName.c_str(), admin_state ? "up" : "down", oper_state ? "up" : "down", mtu);
+    SWSS_LOG_INFO("Add %s admin_status:%s oper_status:%s",
+                   lagName.c_str(), admin_state ? "up" : "down", oper_state ? "up" : "down");
 
     /* Return when the team instance has already been tracked */
     if (m_teamPorts.find(lagName) != m_teamPorts.end())
@@ -160,11 +157,19 @@ int TeamSync::TeamPortSync::onChange()
         bool enabled;
 
         ifindex = team_get_port_ifindex(port);
-        team_ifindex2ifname(m_team, ifindex, ifname, MAX_IFNAME);
+
+        /* Skip if interface is not found */
+        if (!team_ifindex2ifname(m_team, ifindex, ifname, MAX_IFNAME))
+        {
+            SWSS_LOG_INFO("Interface ifindex(%u) is not found", ifindex);
+            continue;
+        }
 
         /* Skip the member that is removed from the LAG */
         if (team_is_port_removed(port))
+        {
             continue;
+        }
 
         team_get_port_enabled(m_team, ifindex, &enabled);
         tmp_lag_members[string(ifname)] = enabled;
@@ -203,22 +208,12 @@ int TeamSync::TeamPortSync::teamdHandler(struct team_handle *team, void *arg,
     return ((TeamSync::TeamPortSync *)arg)->onChange();
 }
 
-void TeamSync::TeamPortSync::addFd(fd_set *fd)
+int TeamSync::TeamPortSync::getFd()
 {
-    FD_SET(team_get_event_fd(m_team), fd);
+    return team_get_event_fd(m_team);
 }
 
-bool TeamSync::TeamPortSync::isMe(fd_set *fd)
-{
-    return FD_ISSET(team_get_event_fd(m_team), fd);
-}
-
-int TeamSync::TeamPortSync::readCache()
-{
-    return NODATA;
-}
-
-void TeamSync::TeamPortSync::readMe()
+void TeamSync::TeamPortSync::readData()
 {
     team_handle_events(m_team);
 }

@@ -20,20 +20,30 @@
 #include "aclorch.h"
 #include "pfcwdorch.h"
 #include "switchorch.h"
+#include "crmorch.h"
+#include "vrforch.h"
+#include "vxlanorch.h"
+#include "countercheckorch.h"
+#include "flexcounterorch.h"
+#include "directory.h"
 
 using namespace swss;
 
 class OrchDaemon
 {
 public:
-    OrchDaemon(DBConnector *, DBConnector *);
+    OrchDaemon(DBConnector *, DBConnector *, DBConnector *);
     ~OrchDaemon();
 
     bool init();
     void start();
+    bool warmRestoreAndSyncUp();
+    void getTaskToSync(vector<string> &ts);
+    bool warmRestoreValidation();
 private:
     DBConnector *m_applDb;
     DBConnector *m_configDb;
+    DBConnector *m_stateDb;
 
     std::vector<Orch *> m_orchList;
     Select *m_select;

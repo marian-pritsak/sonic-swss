@@ -1,4 +1,5 @@
 extern "C" {
+
 #include "sai.h"
 #include "saistatus.h"
 }
@@ -9,7 +10,6 @@ extern "C" {
 #include <sairedis.h>
 #include "timestamp.h"
 #include "saihelper.h"
-#include "bmt_common.h"
 
 using namespace std;
 using namespace swss;
@@ -38,11 +38,15 @@ sai_buffer_api_t*           sai_buffer_api;
 sai_acl_api_t*              sai_acl_api;
 sai_mirror_api_t*           sai_mirror_api;
 sai_fdb_api_t*              sai_fdb_api;
+sai_dtel_api_t*             sai_dtel_api;
 sai_bmtor_api_t*            sai_bmtor_api;
 sai_samplepacket_api_t*     sai_samplepacket_api;
 
 extern sai_object_id_t gSwitchId;
-extern global_config_t g;
+extern bool gSairedisRecord;
+extern bool gSwssRecord;
+extern ofstream gRecordOfs;
+extern string gRecordFile;
 
 map<string, string> gProfileMap;
 
@@ -90,7 +94,7 @@ int test_profile_get_next_value (
         return -1;
 }
 
-const service_method_table_t test_services = {
+const sai_service_method_table_t test_services = {
     test_profile_get_value,
     test_profile_get_next_value
 };
@@ -99,7 +103,7 @@ void initSaiApi()
 {
     SWSS_LOG_ENTER();
 
-    sai_api_initialize(0, (const service_method_table_t *)&test_services);
+    sai_api_initialize(0, (const sai_service_method_table_t *)&test_services);
 
     sai_api_query(SAI_API_SWITCH,               (void **)&sai_switch_api);
     sai_api_query(SAI_API_BRIDGE,               (void **)&sai_bridge_api);
@@ -124,6 +128,7 @@ void initSaiApi()
     sai_api_query(SAI_API_BUFFER,               (void **)&sai_buffer_api);
     sai_api_query(SAI_API_SCHEDULER_GROUP,      (void **)&sai_scheduler_group_api);
     sai_api_query(SAI_API_ACL,                  (void **)&sai_acl_api);
+    sai_api_query(SAI_API_DTEL,                 (void **)&sai_dtel_api);
     sai_api_query(SAI_API_BMTOR,                (void **)&sai_bmtor_api);
     sai_api_query(SAI_API_SAMPLEPACKET,         (void **)&sai_samplepacket_api);
 
@@ -150,6 +155,7 @@ void initSaiApi()
     sai_log_set(SAI_API_BUFFER,                 SAI_LOG_LEVEL_NOTICE);
     sai_log_set(SAI_API_SCHEDULER_GROUP,        SAI_LOG_LEVEL_NOTICE);
     sai_log_set(SAI_API_ACL,                    SAI_LOG_LEVEL_NOTICE);
+    sai_log_set(SAI_API_DTEL,                   SAI_LOG_LEVEL_NOTICE);
 }
 
 void initSaiRedis(const string &record_location)
@@ -165,7 +171,7 @@ void initSaiRedis(const string &record_location)
 
     /* set recording dir before enable recording */
 
-    if (g.sairedisRecord)
+    if (gSairedisRecord)
     {
         attr.id = SAI_REDIS_SWITCH_ATTR_RECORDING_OUTPUT_DIR;
         attr.value.s8list.count = (uint32_t)record_location.size();
@@ -183,13 +189,13 @@ void initSaiRedis(const string &record_location)
     /* Disable/enable SAI Redis recording */
 
     attr.id = SAI_REDIS_SWITCH_ATTR_RECORD;
-    attr.value.booldata = g.sairedisRecord;
+    attr.value.booldata = gSairedisRecord;
 
     status = sai_switch_api->set_switch_attribute(gSwitchId, &attr);
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to %s SAI Redis recording, rv:%d",
-            g.sairedisRecord ? "enable" : "disable", status);
+            gSairedisRecord ? "enable" : "disable", status);
         exit(EXIT_FAILURE);
     }
 

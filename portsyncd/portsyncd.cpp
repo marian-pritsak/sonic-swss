@@ -6,6 +6,7 @@
 #include <set>
 #include <map>
 #include <list>
+#include <sys/stat.h>
 #include "dbconnector.h"
 #include "select.h"
 #include "netdispatcher.h"
@@ -14,6 +15,7 @@
 #include "portsyncd/linksync.h"
 #include "subscriberstatetable.h"
 #include "exec.h"
+#include "warm_restart.h"
 
 using namespace std;
 using namespace swss;
@@ -42,6 +44,7 @@ void handlePortConfigFile(ProducerStateTable &p, string file);
 void handlePortConfigFromConfigDB(ProducerStateTable &p, DBConnector &cfgDb);
 void handleVlanIntfFile(string file);
 void handlePortConfig(ProducerStateTable &p, map<string, KeyOpFieldsValuesTuple> &port_cfg_map);
+void checkPortInitDone(DBConnector *appl_db);
 
 int main(int argc, char **argv)
 {
@@ -72,6 +75,15 @@ int main(int argc, char **argv)
     ProducerStateTable p(&appl_db, APP_PORT_TABLE_NAME);
     SubscriberStateTable portCfg(&cfgDb, CFG_PORT_TABLE_NAME);
 
+    WarmStart::checkWarmStart("portsyncd");
+    if (WarmStart::isWarmStart())
+    {
+        /* clear the init port config buffer */
+        cout << "portsyncd warm start" << endl;
+        deque<KeyOpFieldsValuesTuple> vkco;
+        portCfg.pops(vkco);
+    }
+
     LinkSync sync(&appl_db, &state_db);
     NetDispatcher::getInstance().registerMessageHandler(RTM_NEWLINK, &sync);
     NetDispatcher::getInstance().registerMessageHandler(RTM_DELLINK, &sync);
@@ -84,20 +96,25 @@ int main(int argc, char **argv)
         netlink.registerGroup(RTNLGRP_LINK);
         cout << "Listen to link messages..." << endl;
 
-        if (!port_config_file.empty())
+        /* For portsyncd warm start, don't process init port config again */
+        if (!WarmStart::isWarmStart())
         {
-            handlePortConfigFile(p, port_config_file);
-        } else {
-            handlePortConfigFromConfigDB(p, cfgDb);
+            if (!port_config_file.empty())
+            {
+                handlePortConfigFile(p, port_config_file);
+            } else {
+                handlePortConfigFromConfigDB(p, cfgDb);
+            }
         }
 
         s.addSelectable(&netlink);
         s.addSelectable(&portCfg);
+
         while (true)
         {
             Selectable *temps;
-            int tempfd, ret;
-            ret = s.select(&temps, &tempfd, 1);
+            int ret;
+            ret = s.select(&temps, 1);
 
             if (ret == Select::ERROR)
             {
@@ -169,7 +186,7 @@ void handlePortConfigFromConfigDB(ProducerStateTable &p, DBConnector &cfgDb)
 {
     cout << "Get port configuration from ConfigDB..." << endl;
 
-    Table table(&cfgDb, CFG_PORT_TABLE_NAME, CONFIGDB_TABLE_NAME_SEPARATOR);
+    Table table(&cfgDb, CFG_PORT_TABLE_NAME);
     std::vector<FieldValueTuple> ovalues;
     std::vector<string> keys;
     table.getKeys(keys);
@@ -199,23 +216,21 @@ void handlePortConfigFile(ProducerStateTable &p, string file)
         throw "Port configuration file not found!";
     }
 
-    list<string> header = {"name", "lanes", "alias", "speed"};
+    list<string> header = {"name", "lanes", "alias", "speed", "autoneg", "fec"};
     string line;
     while (getline(infile, line))
     {
         if (line.at(0) == '#')
         {
-            /* Find out what info is specified in the configuration file */
-            for (auto it = header.begin(); it != header.end();)
-            {
-                if (line.find(*it) == string::npos)
-                {
-                    it = header.erase(it);
-                }
-                else
-                {
-                    ++it;
-                }
+            // Take this line as column header line
+            istringstream iss_hdr(line.substr(1));
+            string hdr;
+
+            header.clear();
+            while (! iss_hdr.eof()) {
+                iss_hdr >> hdr;
+                cout << "Adding column header '" << hdr << "'" << endl;
+                header.push_back(hdr);
             }
 
             continue;
@@ -254,6 +269,18 @@ void handlePortConfigFile(ProducerStateTable &p, string file)
             attrs.push_back(speed_attr);
         }
 
+        if ((entry.find("autoneg") != entry.end()) && (entry["autoneg"] != ""))
+        {
+            FieldValueTuple autoneg_attr("autoneg", entry["autoneg"]);
+            attrs.push_back(autoneg_attr);
+        }
+
+        if ((entry.find("fec") != entry.end()) && (entry["fec"] != ""))
+        {
+            FieldValueTuple fec_attr("fec", entry["fec"]);
+            attrs.push_back(fec_attr);
+        }
+
         p.set(entry["name"], attrs);
 
         g_portSet.insert(entry["name"]);
@@ -281,19 +308,6 @@ void handlePortConfig(ProducerStateTable &p, map<string, KeyOpFieldsValuesTuple>
             if (op == SET_COMMAND)
             {
                 p.set(key, values);
-                for (auto fv : values)
-                {
-                    string field = fvField(fv);
-                    string value = fvValue(fv);
-
-                    /* Update the mtu field on host interface */
-                    if (field == "mtu")
-                    {
-                        string cmd, res;
-                        cmd = "ip link set " + key + " mtu " + value;
-                        swss::exec(cmd, res);
-                     }
-                }
             }
 
             it = port_cfg_map.erase(it);

@@ -1,8 +1,11 @@
 #ifndef SWSS_ORCH_H
 #define SWSS_ORCH_H
 
+#include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <memory>
+#include <utility>
 
 extern "C" {
 #include "sai.h"
@@ -30,9 +33,13 @@ const char config_db_key_delimiter = '|';
 
 #define MLNX_PLATFORM_SUBSTRING "mellanox"
 #define BRCM_PLATFORM_SUBSTRING "broadcom"
+#define BFN_PLATFORM_SUBSTRING  "barefoot"
+#define VS_PLATFORM_SUBSTRING   "vs"
 
 #define CONFIGDB_KEY_SEPARATOR "|"
 #define DEFAULT_KEY_SEPARATOR  ":"
+
+const int default_orch_pri = 0;
 
 typedef enum
 {
@@ -50,6 +57,8 @@ typedef map<string, object_map*> type_map;
 typedef pair<string, object_map*> type_map_pair;
 typedef map<string, KeyOpFieldsValuesTuple> SyncMap;
 
+typedef pair<string, int> table_name_with_pri_t;
+
 class Orch;
 
 // Design assumption
@@ -59,19 +68,21 @@ class Orch;
 class Executor : public Selectable
 {
 public:
-    Executor(Selectable *selectable, Orch *orch)
+    Executor(Selectable *selectable, Orch *orch, const string &name)
         : m_selectable(selectable)
         , m_orch(orch)
+        , m_name(name)
     {
     }
 
     virtual ~Executor() { delete m_selectable; }
 
     // Decorating Selectable
-    virtual void addFd(fd_set *fd) { return m_selectable->addFd(fd); }
-    virtual bool isMe(fd_set *fd) { return m_selectable->isMe(fd); }
-    virtual int readCache() { return m_selectable->readCache(); }
-    virtual void readMe() { return m_selectable->readMe(); }
+    int getFd() override { return m_selectable->getFd(); }
+    void readData() override { m_selectable->readData(); }
+    bool hasCachedData() override { return m_selectable->hasCachedData(); }
+    bool initializedWithData() override { return m_selectable->initializedWithData(); }
+    void updateAfterRead() override { m_selectable->updateAfterRead(); }
 
     // Disable copying
     Executor(const Executor&) = delete;
@@ -81,9 +92,17 @@ public:
     virtual void execute() { }
     virtual void drain() { }
 
+    virtual string getName() const
+    {
+        return m_name;
+    }
+
 protected:
     Selectable *m_selectable;
     Orch *m_orch;
+
+    // Name for Executor
+    string m_name;
 
     // Get the underlying selectable
     Selectable *getSelectable() const { return m_selectable; }
@@ -91,14 +110,14 @@ protected:
 
 class Consumer : public Executor {
 public:
-    Consumer(TableConsumable *select, Orch *orch)
-        : Executor(select, orch)
+    Consumer(ConsumerTableBase *select, Orch *orch, const string &name)
+        : Executor(select, orch, name)
     {
     }
 
-    TableConsumable *getConsumerTable() const
+    ConsumerTableBase *getConsumerTable() const
     {
-        return static_cast<TableConsumable *>(getSelectable());
+        return static_cast<ConsumerTableBase *>(getSelectable());
     }
 
     string getTableName() const
@@ -106,12 +125,26 @@ public:
         return getConsumerTable()->getTableName();
     }
 
+    int getDbId() const
+    {
+        return getConsumerTable()->getDbId();
+    }
+
+    string dumpTuple(KeyOpFieldsValuesTuple &tuple);
+    void dumpPendingTasks(vector<string> &ts);
+
+    size_t refillToSync();
+    size_t refillToSync(Table* table);
     void execute();
     void drain();
 
     /* Store the latest 'golden' status */
     // TODO: hide?
     SyncMap m_toSync;
+
+protected:
+    // Returns: the number of entries added to m_toSync
+    size_t addToSync(std::deque<KeyOpFieldsValuesTuple> &entries);
 };
 
 typedef map<string, std::shared_ptr<Executor>> ConsumerMap;
@@ -122,6 +155,7 @@ typedef enum
     field_not_found,
     multiple_instances,
     not_resolved,
+    empty,
     failure
 } ref_resolve_status;
 
@@ -131,15 +165,24 @@ typedef pair<DBConnector *, vector<string>> TablesConnector;
 class Orch
 {
 public:
-    Orch(DBConnector *db, const string tableName);
+    Orch(DBConnector *db, const string tableName, int pri = default_orch_pri);
     Orch(DBConnector *db, const vector<string> &tableNames);
+    Orch(DBConnector *db, const vector<table_name_with_pri_t> &tableNameWithPri);
     Orch(const vector<TableConnector>& tables);
     virtual ~Orch();
 
     vector<Selectable*> getSelectables();
 
+    // add the existing table data (left by warm reboot) to the consumer todo task list.
+    size_t addExistingData(Table *table);
+    size_t addExistingData(const string& tableName);
+
+    // Prepare for warm start if Redis contains valid input data
+    // otherwise fallback to cold start
+    virtual bool bake();
+
     /* Iterate all consumers in m_consumerMap and run doTask(Consumer) */
-    void doTask();
+    virtual void doTask();
 
     /* Run doTask against a specific executor */
     virtual void doTask(Consumer &consumer) = 0;
@@ -148,6 +191,8 @@ public:
 
     /* TODO: refactor recording */
     static void recordTuple(Consumer &consumer, KeyOpFieldsValuesTuple &tuple);
+
+    void dumpPendingTasks(vector<string> &ts);
 protected:
     ConsumerMap m_consumerMap;
 
@@ -159,9 +204,30 @@ protected:
     ref_resolve_status resolveFieldRefArray(type_map&, const string&, KeyOpFieldsValuesTuple&, vector<sai_object_id_t>&);
 
     /* Note: consumer will be owned by this class */
-    void addExecutor(string executorName, Executor* executor);
+    void addExecutor(Executor* executor);
+    Executor *getExecutor(string executorName);
 private:
-    void addConsumer(DBConnector *db, string tableName);
+    void addConsumer(DBConnector *db, string tableName, int pri = default_orch_pri);
+};
+
+#include "request_parser.h"
+
+class Orch2 : public Orch
+{
+public:
+    Orch2(DBConnector *db, const std::string& tableName, Request& request, int pri=default_orch_pri)
+        : Orch(db, tableName, pri), request_(request)
+    {
+    }
+
+protected:
+    virtual void doTask(Consumer& consumer);
+
+    virtual bool addOperation(const Request& request)=0;
+    virtual bool delOperation(const Request& request)=0;
+
+private:
+    Request& request_;
 };
 
 #endif /* SWSS_ORCH_H */

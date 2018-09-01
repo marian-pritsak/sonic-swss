@@ -32,10 +32,8 @@ public:
                      ProducerStateTable *lagMemberTable);
         ~TeamPortSync();
 
-        virtual void addFd(fd_set *fd);
-        virtual bool isMe(fd_set *fd);
-        virtual int readCache();
-        virtual void readMe();
+        int getFd() override;
+        void readData() override;
 
     protected:
         int onChange();
@@ -52,7 +50,7 @@ public:
 
 protected:
     void addLag(const std::string &lagName, int ifindex, bool admin_state,
-                bool oper_state, unsigned int mtu);
+                bool oper_state);
     void removeLag(const std::string &lagName);
 
 private:

@@ -1,10 +1,12 @@
 Schema data is defined in ABNF [RFC5234](https://tools.ietf.org/html/rfc5234) syntax.
 
-### Definitions of common tokens
+## Definitions of common tokens
     name                    = 1*DIGIT/1*ALPHA
     ref_hash_key_reference  = "[" hash_key "]" ;The token is a refernce to another valid DB key.
     hash_key                = name ; a valid key name (i.e. exists in DB)
 
+
+## Application DB schema
 
 ### PORT_TABLE
 Stores information for physical switch ports managed by the switch chip.  device_names are defined in [port_config.ini](../portsyncd/port_config.ini).  Ports to the CPU (ie: management port) and logical ports (loopback) are not declared in the PORT_TABLE.   See INTF_TABLE.
@@ -313,6 +315,7 @@ and reflects the LAG ports into the redis under: `LAG_TABLE:<team0>:port`
     key                     = TUNNEL_DECAP_TABLE:name
     ;field                      value
     tunnel_type             = "IPINIP"
+    src_ip                  = IP
     dst_ip                  = IP1,IP2 ;IP addresses separated by ","
     dscp_mode               = "uniform" / "pipe"
     ecn_mode                = "copy_from_outer" / "standard" ;standard: Behavior defined in RFC 6040 section 4.2
@@ -320,18 +323,22 @@ and reflects the LAG ports into the redis under: `LAG_TABLE:<team0>:port`
 
     IP = dec-octet "." dec-octet "." dec-octet "." dec-octet
 
+    "src_ip" field is optional
+
     Example:
     127.0.0.1:6379> hgetall TUNNEL_DECAP_TABLE:NETBOUNCER
     1) "dscp_mode"
     2) "uniform"
-    3) "dst_ip"
+    3) "src_ip"
     4) "127.0.0.1"
-    5) "ecn_mode"
-    6) "copy_from_outer"
-    7) "ttl_mode"
-    8) "uniform"
-    9) "tunnel_type"
-    10) "IPINIP"
+    5) "dst_ip"
+    6) "127.0.0.1"
+    7) "ecn_mode"
+    8) "copy_from_outer"
+    9) "ttl_mode"
+    10) "uniform"
+    11) "tunnel_type"
+    12) "IPINIP"
 
 ---------------------------------------------
 
@@ -419,7 +426,7 @@ Stores information about ACL tables on the switch.  Port names are defined in [p
     key           = ACL_TABLE:name          ; acl_table_name must be unique
     ;field        = value
     policy_desc   = 1*255VCHAR              ; name of the ACL policy table description
-    type          = "mirror"/"l3"           ; type of acl table, every type of
+    type          = "mirror"/"l3"/"l3v6"    ; type of acl table, every type of
                                             ; table defines the match/action a
                                             ; specific set of match and actions.
     ports         = [0-max_ports]*port_name ; the ports to which this ACL
@@ -459,8 +466,7 @@ Stores rules associated with a specific ACL table on the switch.
     ether_type    = h16                        ; Ethernet type field
 
     ip_type       = ip_types                   ; options of the l2_protocol_type
-                                               ; field. Only v4 is support for
-                                               ; this stage.
+                                               ; field.
 
     ip_protocol   = h8                         ; options of the l3_protocol_type field
 
@@ -468,6 +474,12 @@ Stores rules associated with a specific ACL table on the switch.
                                                ; address (and mask) field
 
     dst_ip        = ipv4_prefix                ; options of the destination ipv4
+                                               ; address (and mask) field
+
+    src_ipv6      = ipv6_prefix                ; options of the source ipv6
+                                               ; address (and mask) field
+
+    dst_ipv6      = ipv6_prefix                ; options of the destination ipv6
                                                ; address (and mask) field
 
     l4_src_port   = port_num                   ; source L4 port or the
@@ -615,7 +627,64 @@ Equivalent RedisDB entry:
     12) "0"
     127.0.0.1:6379>
 
-### Configuration files
+
+## Configuration DB schema
+
+### WARM\_RESTART
+    ;Stores system warm start configuration
+    ;Status: work in progress
+
+    key                 = WARM_RESTART:name ; name is the name of SONiC docker or "system" for global configuration.
+
+    enable              = "true" / "false"  ; Default value as false.
+                                            ; If "system" warm start knob is true, docker level knob will be ignored.
+                                            ; If "system" warm start knob is false, docker level knob takes effect.
+
+    neighsyncd_timer    = 1*4DIGIT          ; neighsyncd_timer is the timer used for neighsyncd during the warm restart.
+                                            ; Timer is started after we restored the neighborTable to internal data structures.
+                                            ; neighborsyncd then starts to read all linux kernel entries and mark the entries in
+                                            ; the data structures accordingly. Once the timer is expired, we will do reconciliation
+                                            ; and push the delta to appDB
+                                            ; Valid value is 1-9999. 0 is invalid.
+
+### VXLAN\_TUNNEL
+Stores vxlan tunnels configuration
+Status: ready
+
+    key       = VXLAN_TUNNEL:name               ; name is an arbitrary name of vxlan tunnel
+    src_ip    = ipv4_address                    ; tunnel source IP address. Mandatory
+    dst_ip    = ipv4_address                    ; tunnel destination IP address. Optional. When this attribute is omitted or equal to "0.0.0.0"
+                                                ; the created tunnel will be P2MP. Otherwise the created tunnel will be P2P
+
+### VXLAN\_TUNNEL\_MAP
+Stores vxlan tunnel map configuration. Defines mapping between vxlan vni and vlan interface
+Status: ready
+
+    key       = VXLAN_TUNNEL_MAP:tunnel_name:tunnel_map_name
+                                                ; tunnel_name is a reference to created vxlan tunnel
+                                                ; tunnel_map_name is an arbitrary name of the map
+    vni       = uint24                          ; vni id, defined for tunnel map
+    vlan      = "Vlan"vlan_id                   ; name of the existing vlan interface
+
+
+## State DB schema
+
+### WARM\_RESTART\_TABLE
+    ;Stores application and orchdameon warm start status
+    ;Status: work in progress
+
+    key             = WARM_RESTART_TABLE:process_name         ; process_name is a unique process identifier.
+    restart_count   = 1*10DIGIT                               ; a number between 0 and 2147483647,
+                                                              ; count of warm start times.
+
+    state           = "init" / "restored" / "reconciled"      ; init: process init with warm start enabled.
+                                                              ; restored: process restored to the previous
+                                                              ; state using saved data.
+                                                              ; reconciled: process reconciled with up to date
+                                                              ; dynanic data like port state, neighbor, routes
+                                                              ; and so on.
+
+## Configuration files
 What configuration files should we have?  Do apps, orch agent each need separate files?
 
 [port_config.ini](https://github.com/stcheng/swss/blob/mock/portsyncd/port_config.ini) - defines physical port information

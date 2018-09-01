@@ -28,6 +28,8 @@ public:
 
     void increaseRouterIntfsRefCount(const string&);
     void decreaseRouterIntfsRefCount(const string&);
+
+    bool setRouterIntfsMtu(Port &port);
 private:
     IntfsTable m_syncdIntfses;
     void doTask(Consumer &consumer);
@@ -42,6 +44,9 @@ private:
 
     void addIp2MeRoute(const IpPrefix &ip_prefix);
     void removeIp2MeRoute(const IpPrefix &ip_prefix);
+
+    void addDirectedBroadcast(const Port &port, const IpAddress &ip_addr);
+    void removeDirectedBroadcast(const Port &port, const IpAddress &ip_addr);
 };
 
 #endif /* SWSS_INTFSORCH_H */

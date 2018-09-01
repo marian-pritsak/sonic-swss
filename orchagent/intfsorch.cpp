@@ -9,18 +9,24 @@
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
-#include "bmt_common.h"
+#include "crmorch.h"
+#include "bufferorch.h"
 
-extern global_config_t g;
+extern sai_object_id_t gVirtualRouterId;
 
 extern sai_router_interface_api_t*  sai_router_intfs_api;
 extern sai_route_api_t*             sai_route_api;
+extern sai_neighbor_api_t*          sai_neighbor_api;
 
-extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
+extern PortsOrch *gPortsOrch;
+extern CrmOrch *gCrmOrch;
+extern BufferOrch *gBufferOrch;
+
+const int intfsorch_pri = 35;
 
 IntfsOrch::IntfsOrch(DBConnector *db, string tableName) :
-        Orch(db, tableName)
+        Orch(db, tableName, intfsorch_pri)
 {
     SWSS_LOG_ENTER();
 }
@@ -49,6 +55,27 @@ void IntfsOrch::decreaseRouterIntfsRefCount(const string &alias)
     m_syncdIntfses[alias].ref_count--;
     SWSS_LOG_DEBUG("Router interface %s ref count is decreased to %d",
                   alias.c_str(), m_syncdIntfses[alias].ref_count);
+}
+
+bool IntfsOrch::setRouterIntfsMtu(Port &port)
+{
+    SWSS_LOG_ENTER();
+
+    sai_attribute_t attr;
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_MTU;
+    attr.value.u32 = port.m_mtu;
+
+    sai_status_t status = sai_router_intfs_api->
+            set_router_interface_attribute(port.m_rif_id, &attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to set router interface %s MTU to %u, rv:%d",
+                port.m_alias.c_str(), port.m_mtu, status);
+        return false;
+    }
+    SWSS_LOG_NOTICE("Set router interface %s MTU to %u",
+            port.m_alias.c_str(), port.m_mtu);
+    return true;
 }
 
 void IntfsOrch::doTask(Consumer &consumer)
@@ -89,6 +116,13 @@ void IntfsOrch::doTask(Consumer &consumer)
             if (!gPortsOrch->getPort(alias, port))
             {
                 /* TODO: Resolve the dependency relationship and add ref_count to port */
+                it++;
+                continue;
+            }
+
+            // buffer configuration hasn't been applied yet, hold from intf config.
+            if (!gBufferOrch->isPortReady(alias))
+            {
                 it++;
                 continue;
             }
@@ -147,6 +181,11 @@ void IntfsOrch::doTask(Consumer &consumer)
             addSubnetRoute(port, ip_prefix);
             addIp2MeRoute(ip_prefix);
 
+            if (port.m_type == Port::VLAN && ip_prefix.isV4())
+            {
+                addDirectedBroadcast(port, ip_prefix.getBroadcastIp());
+            }
+
             m_syncdIntfses[alias].ip_addresses.insert(ip_prefix);
             it = consumer.m_toSync.erase(it);
         }
@@ -173,6 +212,10 @@ void IntfsOrch::doTask(Consumer &consumer)
                 {
                     removeSubnetRoute(port, ip_prefix);
                     removeIp2MeRoute(ip_prefix);
+                    if(port.m_type == Port::VLAN && ip_prefix.isV4())
+                    {
+                        removeDirectedBroadcast(port, ip_prefix.getBroadcastIp());
+                    }
 
                     m_syncdIntfses[alias].ip_addresses.erase(ip_prefix);
                 }
@@ -217,11 +260,11 @@ bool IntfsOrch::addRouterIntfs(Port &port)
     vector<sai_attribute_t> attrs;
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
-    attr.value.oid = g.virtualRouterId;
+    attr.value.oid = gVirtualRouterId;
     attrs.push_back(attr);
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_SRC_MAC_ADDRESS;
-    memcpy(attr.value.mac, g.macAddress.getMac(), sizeof(sai_mac_t));
+    memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
     attrs.push_back(attr);
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
@@ -267,13 +310,14 @@ bool IntfsOrch::addRouterIntfs(Port &port)
     sai_status_t status = sai_router_intfs_api->create_router_interface(&port.m_rif_id, gSwitchId, (uint32_t)attrs.size(), attrs.data());
     if (status != SAI_STATUS_SUCCESS)
     {
-        SWSS_LOG_ERROR("Failed to create router interface for port %s, rv:%d", port.m_alias.c_str(), status);
+        SWSS_LOG_ERROR("Failed to create router interface %s, rv:%d",
+                port.m_alias.c_str(), status);
         throw runtime_error("Failed to create router interface.");
     }
 
     gPortsOrch->setPort(port.m_alias, port);
 
-    SWSS_LOG_NOTICE("Create router interface for port %s mtu %u", port.m_alias.c_str(), port.m_mtu);
+    SWSS_LOG_NOTICE("Create router interface %s MTU %u", port.m_alias.c_str(), port.m_mtu);
 
     return true;
 }
@@ -307,7 +351,7 @@ void IntfsOrch::addSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = g.virtualRouterId;
+    unicast_route_entry.vr_id = gVirtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix);
     subnet(unicast_route_entry.destination, unicast_route_entry.destination);
 
@@ -333,13 +377,22 @@ void IntfsOrch::addSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
     SWSS_LOG_NOTICE("Create subnet route to %s from %s",
                     ip_prefix.to_string().c_str(), port.m_alias.c_str());
     increaseRouterIntfsRefCount(port.m_alias);
+
+    if (unicast_route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+    {
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+    }
+    else
+    {
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+    }
 }
 
 void IntfsOrch::removeSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = g.virtualRouterId;
+    unicast_route_entry.vr_id = gVirtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix);
     subnet(unicast_route_entry.destination, unicast_route_entry.destination);
 
@@ -354,13 +407,22 @@ void IntfsOrch::removeSubnetRoute(const Port &port, const IpPrefix &ip_prefix)
     SWSS_LOG_NOTICE("Remove subnet route to %s from %s",
                     ip_prefix.to_string().c_str(), port.m_alias.c_str());
     decreaseRouterIntfsRefCount(port.m_alias);
+
+    if (unicast_route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+    {
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+    }
+    else
+    {
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+    }
 }
 
 void IntfsOrch::addIp2MeRoute(const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = g.virtualRouterId;
+    unicast_route_entry.vr_id = gVirtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix.getIp());
 
     sai_attribute_t attr;
@@ -385,13 +447,22 @@ void IntfsOrch::addIp2MeRoute(const IpPrefix &ip_prefix)
     }
 
     SWSS_LOG_NOTICE("Create IP2me route ip:%s", ip_prefix.getIp().to_string().c_str());
+
+    if (unicast_route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+    {
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+    }
+    else
+    {
+        gCrmOrch->incCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+    }
 }
 
 void IntfsOrch::removeIp2MeRoute(const IpPrefix &ip_prefix)
 {
     sai_route_entry_t unicast_route_entry;
     unicast_route_entry.switch_id = gSwitchId;
-    unicast_route_entry.vr_id = g.virtualRouterId;
+    unicast_route_entry.vr_id = gVirtualRouterId;
     copy(unicast_route_entry.destination, ip_prefix.getIp());
 
     sai_status_t status = sai_route_api->remove_route_entry(&unicast_route_entry);
@@ -402,4 +473,62 @@ void IntfsOrch::removeIp2MeRoute(const IpPrefix &ip_prefix)
     }
 
     SWSS_LOG_NOTICE("Remove packet action trap route ip:%s", ip_prefix.getIp().to_string().c_str());
+
+    if (unicast_route_entry.destination.addr_family == SAI_IP_ADDR_FAMILY_IPV4)
+    {
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV4_ROUTE);
+    }
+    else
+    {
+        gCrmOrch->decCrmResUsedCounter(CrmResourceType::CRM_IPV6_ROUTE);
+    }
+}
+
+void IntfsOrch::addDirectedBroadcast(const Port &port, const IpAddress &ip_addr)
+{
+    sai_status_t status;
+    sai_neighbor_entry_t neighbor_entry;
+    neighbor_entry.rif_id = port.m_rif_id;
+    neighbor_entry.switch_id = gSwitchId;
+    copy(neighbor_entry.ip_address, ip_addr);
+
+    sai_attribute_t neighbor_attr;
+    neighbor_attr.id = SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS;
+    memcpy(neighbor_attr.value.mac, MacAddress("ff:ff:ff:ff:ff:ff").getMac(), 6);
+
+    status = sai_neighbor_api->create_neighbor_entry(&neighbor_entry, 1, &neighbor_attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create broadcast entry %s rv:%d",
+                       ip_addr.to_string().c_str(), status);
+        return;
+    }
+
+    SWSS_LOG_NOTICE("Add broadcast route for ip:%s", ip_addr.to_string().c_str());
+}
+
+void IntfsOrch::removeDirectedBroadcast(const Port &port, const IpAddress &ip_addr)
+{
+    sai_status_t status;
+    sai_neighbor_entry_t neighbor_entry;
+    neighbor_entry.rif_id = port.m_rif_id;
+    neighbor_entry.switch_id = gSwitchId;
+    copy(neighbor_entry.ip_address, ip_addr);
+
+    status = sai_neighbor_api->remove_neighbor_entry(&neighbor_entry);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        if (status == SAI_STATUS_ITEM_NOT_FOUND)
+        {
+            SWSS_LOG_ERROR("No broadcast entry found for %s", ip_addr.to_string().c_str());
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Failed to remove broadcast entry %s rv:%d",
+                           ip_addr.to_string().c_str(), status);
+        }
+        return;
+    }
+
+    SWSS_LOG_NOTICE("Remove broadcast route ip:%s", ip_addr.to_string().c_str());
 }
