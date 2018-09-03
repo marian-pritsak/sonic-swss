@@ -7,8 +7,8 @@
 
 extern sai_tunnel_api_t* sai_tunnel_api;
 extern sai_router_interface_api_t* sai_router_intfs_api;
-
-extern global_config_t g;
+extern gUnderlayIfId;
+extern gVirtualRouterId;
 extern sai_object_id_t  gSwitchId;
 extern PortsOrch*       gPortsOrch;
 
@@ -202,7 +202,7 @@ bool TunnelDecapOrch::addDecapTunnel(string key, string type, IpAddresses dst_ip
 
     sai_attribute_t overlay_intf_attr;
     overlay_intf_attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
-    overlay_intf_attr.value.oid = g.virtualRouterId;
+    overlay_intf_attr.value.oid = gVirtualRouterId;
     overlay_intf_attrs.push_back(overlay_intf_attr);
 
     overlay_intf_attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
@@ -226,7 +226,7 @@ bool TunnelDecapOrch::addDecapTunnel(string key, string type, IpAddresses dst_ip
     attr.value.oid = overlayIfId;
     tunnel_attrs.push_back(attr);
     attr.id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
-    attr.value.oid = g.underlayIfId;
+    attr.value.oid = gUnderlayIfId;
     tunnel_attrs.push_back(attr);
 
     // tunnel src ip
