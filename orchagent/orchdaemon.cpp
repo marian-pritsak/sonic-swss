@@ -73,7 +73,7 @@ bool OrchDaemon::init()
         "VNET",         //TODO: ConfigDB
         "VNET_INTF",    //TODO: ConfigDB
         "VRF_INTF",    //TODO: ConfigDB
-        "VXLAN_TUNNEL",  //TODO: ConfigDB
+        /* "VXLAN_TUNNEL",  //TODO: ConfigDB */
         "ENCAP_TUNNEL_TABLE"
     };
 

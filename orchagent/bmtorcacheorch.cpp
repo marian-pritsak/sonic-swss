@@ -11,7 +11,6 @@
 #include "tokenize.h"
 #include "bmt_common.h"
 
-extern global_config_t g;
 
 // extern sai_router_interface_api_t*  sai_router_intfs_api;
 // extern sai_route_api_t*             sai_route_api;
@@ -19,7 +18,6 @@ extern sai_bmtor_api_t*                sai_bmtor_api;
 extern sai_switch_api_t*               sai_switch_api;
 extern sai_port_api_t*                 sai_port_api;
 extern sai_tunnel_api_t*               sai_tunnel_api;
-extern sai_bridge_api_t*               sai_bridge_api;
 extern sai_vlan_api_t*                 sai_vlan_api;
 
 extern PortsOrch *gPortsOrch;
@@ -211,7 +209,7 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
   tunnel_attr[0].id = SAI_TUNNEL_ATTR_TYPE;
   tunnel_attr[0].value.s32 = SAI_TUNNEL_TYPE_VXLAN;
   tunnel_attr[1].id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
-  tunnel_attr[1].value.oid = g.underlayIfId;
+  tunnel_attr[1].value.oid = gUnderlayIfId;
   tunnel_attr[2].id = SAI_TUNNEL_ATTR_OVERLAY_INTERFACE;
   tunnel_attr[2].value.oid = bm_port_oid;
   tunnel_attr[3].id = SAI_TUNNEL_ATTR_DECAP_ECN_MODE;
@@ -236,7 +234,7 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
   SWSS_LOG_NOTICE("sai_tunnel_id = 0x%lx\n", gTunnelId);
   sai_attribute_t tunnel_term_table_entry_attr[5];
   tunnel_term_table_entry_attr[0].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_VR_ID;
-  tunnel_term_table_entry_attr[0].value.oid = g.virtualRouterId;
+  tunnel_term_table_entry_attr[0].value.oid = gVirtualRouterId;
   tunnel_term_table_entry_attr[1].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_TYPE;
   tunnel_term_table_entry_attr[1].value.s32 = SAI_TUNNEL_TERM_TABLE_ENTRY_TYPE_P2MP;
   tunnel_term_table_entry_attr[2].id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_DST_IP;
