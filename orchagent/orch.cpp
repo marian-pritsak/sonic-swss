@@ -70,12 +70,6 @@ size_t Consumer::addToSync(std::deque<KeyOpFieldsValuesTuple> &entries)
 {
     SWSS_LOG_ENTER();
 
-    // TODO: remove DbMutex when there is only single thread
-    lock_guard<mutex> lock(gDbMutex);
-
-    std::deque<KeyOpFieldsValuesTuple> entries;
-    getConsumerTable()->pops(entries);
-
     /* Nothing popped */
     if (entries.empty())
     {
@@ -519,7 +513,7 @@ void Orch::addConsumer(DBConnector *db, string tableName, int pri)
     }
     else
     {
-        addExecutor(tableName, new Consumer(new ConsumerStateTable(db, tableName, gBatchSize), this));
+        addExecutor(new Consumer(new ConsumerStateTable(db, tableName, gBatchSize, pri), this, tableName));
     }
 }
 

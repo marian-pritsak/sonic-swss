@@ -3,12 +3,12 @@
 #include "portsorch.h"
 #include "logger.h"
 #include "swssnet.h"
-#include "bmt_common.h"
 
 extern sai_tunnel_api_t* sai_tunnel_api;
 extern sai_router_interface_api_t* sai_router_intfs_api;
-extern gUnderlayIfId;
-extern gVirtualRouterId;
+
+extern sai_object_id_t  gVirtualRouterId;
+extern sai_object_id_t  gUnderlayIfId;
 extern sai_object_id_t  gSwitchId;
 extern PortsOrch*       gPortsOrch;
 
@@ -317,7 +317,7 @@ bool TunnelDecapOrch::addDecapTunnelTermEntries(string tunnelKey, IpAddresses ds
     // adding tunnel table entry attributes to array and writing to ASIC_DB
     vector<sai_attribute_t> tunnel_table_entry_attrs;
     attr.id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_VR_ID;
-    attr.value.oid = g.virtualRouterId;
+    attr.value.oid = gVirtualRouterId;
     tunnel_table_entry_attrs.push_back(attr);
 
     attr.id = SAI_TUNNEL_TERM_TABLE_ENTRY_ATTR_TYPE;

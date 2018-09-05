@@ -24,7 +24,7 @@ extern "C" {
 #include "notifications.h"
 #include <signal.h>
 #include "warm_restart.h"
-#include "bmt_common.h"
+//#include "bmt_common.h"
 
 using namespace std;
 using namespace swss;
@@ -48,9 +48,6 @@ bool gSwssRecord = true;
 bool gLogRotate = false;
 ofstream gRecordOfs;
 string gRecordFile;
-
-/* Global database mutex */
-mutex gDbMutex;
 
 void usage()
 {
@@ -177,6 +174,7 @@ int main(int argc, char **argv)
     }
 
     SWSS_LOG_NOTICE("--- Starting Orchestration Agent ---");
+
     initSaiApi();
     initSaiRedis(record_location);
 

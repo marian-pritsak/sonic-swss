@@ -11,6 +11,9 @@
 #include <map>
 #include <set>
 
+extern sai_object_id_t gVirtualRouterId;
+extern MacAddress gMacAddress;
+
 struct IntfsEntry
 {
     std::set<IpPrefix>  ip_addresses;

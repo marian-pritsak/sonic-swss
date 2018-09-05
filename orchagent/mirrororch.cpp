@@ -9,7 +9,6 @@
 #include "swssnet.h"
 #include "converter.h"
 #include "mirrororch.h"
-#include "bmt_common.h"
 
 #define MIRROR_SESSION_STATUS           "status"
 #define MIRROR_SESSION_STATUS_ACTIVE    "active"
@@ -28,7 +27,6 @@
 #define MIRROR_SESSION_DSCP_MIN         0
 #define MIRROR_SESSION_DSCP_MAX         63
 
-extern global_config_t g;
 extern sai_mirror_api_t *sai_mirror_api;
 
 extern sai_object_id_t  gSwitchId;
@@ -477,7 +475,7 @@ bool MirrorOrch::activateSession(const string& name, MirrorEntry& session)
     attrs.push_back(attr);
 
     attr.id =SAI_MIRROR_SESSION_ATTR_SRC_MAC_ADDRESS;
-    memcpy(attr.value.mac, g.macAddress.getMac(), sizeof(sai_mac_t));
+    memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
     attrs.push_back(attr);
 
     attr.id =SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS;

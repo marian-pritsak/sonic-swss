@@ -1312,7 +1312,7 @@ task_process_status QosOrch::handlePortQosMapTable(Consumer& consumer)
             for(string q_ind : queue_indexes)
             {
                 sai_uint8_t q_val = (uint8_t)stoi(q_ind);
-                pfc_enable = (uint8_t) (pfc_enable | (uint8_t)(1 << q_val));
+                pfc_enable |= (uint8_t)(1 << q_val);
             }
         }
     }
