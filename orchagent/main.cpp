@@ -83,13 +83,13 @@ void sighup_handler(int signo)
     }
 }
 
-void sig_handler(int signo){
-    if (signo == SIGINT){
-       g.scanDpdkPort=false;
-       g.exitFlag=true;
+/* void sig_handler(int signo){ */
+/*     if (signo == SIGINT){ */
+/*        g.scanDpdkPort=false; */
+/*        g.exitFlag=true; */
 
-    } 
-}
+/*     } */ 
+/* } */
 
 void syncd_apply_view()
 {
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
         SWSS_LOG_ERROR("failed to setup SIGHUP action");
         exit(1);
     }
-    signal(SIGINT, sig_handler); // bmt_addition
+    /* signal(SIGINT, sig_handler); // bmt_addition */
     int opt;
     sai_status_t status;
 
