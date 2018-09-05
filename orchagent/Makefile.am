@@ -10,7 +10,7 @@ dist_swss_DATA = \
 		 pfc_detect_barefoot.lua \
 		 pfc_restore.lua
 
-bin_PROGRAMS = orchagent routeresync bmt_debug
+bin_PROGRAMS = orchagent routeresync
 
 if DEBUG
 DBGFLAGS = -ggdb -DDEBUG
@@ -45,9 +45,6 @@ orchagent_SOURCES = \
             vxlanorch.cpp \
             dtelorch.cpp \
             flexcounterorch.cpp \
-	 	    bmt_common.cpp \
-		    bmt_cache_debug.cpp \
-		    bmt_cache_inserter.cpp \
 		    bmtorcacheorch.cpp \
             acltable.h \
             aclorch.h \
@@ -81,10 +78,6 @@ orchagent_SOURCES = \
             flexcounterorch.h   \
             $(top_srcdir)/warmrestart/warm_restart.cpp \
             $(top_srcdir)/warmrestart/warm_restart.h \
-		    bmt_cache_debug.h \
-		    bmt_cache_inserter.h \
-		    bmt_common.h \
-		    bmt_orch_constants.h \
 		    bmtorcacheorch.h
 
 orchagent_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_SAI)
@@ -95,8 +88,3 @@ routeresync_SOURCES = routeresync.cpp
 routeresync_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
 routeresync_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
 routeresync_LDADD = -lswsscommon
-
-bmt_debug_SOURCES = bmt_debug.cpp
-bmt_debug_CFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
-bmt_debug_CPPFLAGS = $(DBGFLAGS) $(AM_CFLAGS) $(CFLAGS_COMMON)
-bmtor_cli_LDADD = 

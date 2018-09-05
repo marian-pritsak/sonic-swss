@@ -296,8 +296,8 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
   // sai_tunnel_map_t encap_map = { .value.vni_id = vni, .key}
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VLAN_ID_TO_VNI;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
+  tunnel_map_attr[1].value.objlist.count = 0;
   status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
   printf("create_tunnel_map (encap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
@@ -310,8 +310,8 @@ int bmt_init(bmt_init_status_t* bmt_common_init)
 
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_VLAN_ID;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
+  tunnel_map_attr[1].value.objlist.count = 0;
   status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
   printf("create_tunnel_map (decap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)

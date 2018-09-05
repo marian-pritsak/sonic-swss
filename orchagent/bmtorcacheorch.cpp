@@ -19,23 +19,26 @@ extern sai_switch_api_t*               sai_switch_api;
 extern sai_port_api_t*                 sai_port_api;
 extern sai_tunnel_api_t*               sai_tunnel_api;
 extern sai_vlan_api_t*                 sai_vlan_api;
+extern sai_bridge_api_t*               sai_bridge_api;
 
 extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
+extern sai_object_id_t gVirtualRouterId;
+extern sai_object_id_t gUnderlayIfId;
 #define NUM_OF_VNI 32
 
 BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
 {
     SWSS_LOG_ENTER();
-    gDPDKVlan = 3904;
+    /* gDPDKVlan = 3904; */
     gVlansStart = 120;
     gTunnelId = SAI_NULL_OBJECT_ID;
     gVnetBitmap = 0xfff;
     gVhostTableSize = 256;
-    dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument?
-    bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce?
-    SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid);
+    /* dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument? */
+    /* bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce? */
+    /* SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid); */
 }
 
 sai_object_id_t BmToRCacheOrch::create_vlan(uint16_t vid) { //TODO: change to portsorch
@@ -178,9 +181,9 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
   sai_object_id_t tunnel_term_table_entry;
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_BRIDGE_IF_TO_VNI;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
-  tunnel_map_attr[1].value.tunnelmap.list = NULL;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
+  tunnel_map_attr[1].value.objlist.count = 0;
+  tunnel_map_attr[1].value.objlist.list = NULL;
   status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
   SWSS_LOG_NOTICE("create_tunnel_map (encap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
@@ -197,9 +200,9 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
 
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_BRIDGE_IF;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_MAP_TO_VALUE_LIST;
-  tunnel_map_attr[1].value.tunnelmap.count = 0;
-  tunnel_map_attr[1].value.tunnelmap.list = NULL;
+  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
+  tunnel_map_attr[1].value.objlist.count = 0;
+  tunnel_map_attr[1].value.objlist.list = NULL;
   status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
   SWSS_LOG_NOTICE("create_tunnel_map (decap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)

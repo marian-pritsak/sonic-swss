@@ -18,18 +18,11 @@
 using namespace std;
 using namespace swss;
 
+extern MacAddress gMacAddress;
+
 /* select() function timeout retry time, in millisecond */
 #define SELECT_TIMEOUT 1000
 
-/*
- * Following global variables are defined here for the purpose of
- * using existing Orch class which is to be refactored soon to
- * eliminate the direct exposure of the global variables.
- *
- * Once Orch class refactoring is done, these global variables
- * should be removed from here.
- */
-global_config_t g;
 
 int main(int argc, char **argv)
 {
@@ -63,7 +56,7 @@ int main(int argc, char **argv)
         if ( it == ovalues.end() ) {
             throw runtime_error("couldn't find MAC address of the device from config DB");
         }
-        g.macAddress = MacAddress(it->second);
+        gMacAddress = MacAddress(it->second);
 
         VlanMgr vlanmgr(&cfgDb, &appDb, &stateDb, cfg_vlan_tables);
 
