@@ -9,7 +9,7 @@
 #include "logger.h"
 #include "swssnet.h"
 #include "tokenize.h"
-#include "bmt_common.h"
+/* #include "bmt_common.h" */
 
 
 // extern sai_router_interface_api_t*  sai_router_intfs_api;
@@ -26,6 +26,7 @@ extern sai_object_id_t gSwitchId;
 extern sai_object_id_t gVirtualRouterId;
 extern sai_object_id_t gUnderlayIfId;
 #define NUM_OF_VNI 32
+#define VHOST_TABLE_SIZE 256
 
 BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
@@ -35,9 +36,8 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
     gVlansStart = 120;
     gTunnelId = SAI_NULL_OBJECT_ID;
     gVnetBitmap = 0xfff;
-    gVhostTableSize = 256;
     /* dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument? */
-    /* bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce? */
+    bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce? */
     /* SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid); */
 }
 
@@ -53,33 +53,33 @@ sai_object_id_t BmToRCacheOrch::create_vlan(uint16_t vid) { //TODO: change to po
   return SAI_NULL_OBJECT_ID;
 }
 
-sai_object_id_t BmToRCacheOrch::add_dpdk_vlan_member(sai_object_id_t vlan_oid) { //TODO: change to portsorch
-  sai_attribute_t vlan_member_attr[3];
-  vlan_member_attr[0].id = SAI_VLAN_MEMBER_ATTR_VLAN_ID;
-  vlan_member_attr[0].value.oid = vlan_oid;
-  vlan_member_attr[1].id = SAI_VLAN_MEMBER_ATTR_VLAN_TAGGING_MODE;
-  vlan_member_attr[1].value.s32 = SAI_VLAN_TAGGING_MODE_TAGGED;
-  vlan_member_attr[2].id = SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID;
-  vlan_member_attr[2].value.oid = gDpdkBirdgePort;
-  sai_object_id_t vlan_member_oid;
-  sai_status_t status = sai_vlan_api->create_vlan_member(&vlan_member_oid, gSwitchId, 3, vlan_member_attr);
-  SWSS_LOG_NOTICE("Vlan member created. status = %d", status);
-  if (status == SAI_STATUS_SUCCESS)
-    return vlan_member_oid;
-  return SAI_NULL_OBJECT_ID;
-}
+/* sai_object_id_t BmToRCacheOrch::add_dpdk_vlan_member(sai_object_id_t vlan_oid) { //TODO: change to portsorch */
+/*   sai_attribute_t vlan_member_attr[3]; */
+/*   vlan_member_attr[0].id = SAI_VLAN_MEMBER_ATTR_VLAN_ID; */
+/*   vlan_member_attr[0].value.oid = vlan_oid; */
+/*   vlan_member_attr[1].id = SAI_VLAN_MEMBER_ATTR_VLAN_TAGGING_MODE; */
+/*   vlan_member_attr[1].value.s32 = SAI_VLAN_TAGGING_MODE_TAGGED; */
+/*   vlan_member_attr[2].id = SAI_VLAN_MEMBER_ATTR_BRIDGE_PORT_ID; */
+/*   vlan_member_attr[2].value.oid = gDpdkBirdgePort; */
+/*   sai_object_id_t vlan_member_oid; */
+/*   sai_status_t status = sai_vlan_api->create_vlan_member(&vlan_member_oid, gSwitchId, 3, vlan_member_attr); */
+/*   SWSS_LOG_NOTICE("Vlan member created. status = %d", status); */
+/*   if (status == SAI_STATUS_SUCCESS) */
+/*     return vlan_member_oid; */
+/*   return SAI_NULL_OBJECT_ID; */
+/* } */
 
-void BmToRCacheOrch::create_dpdk_bridge_port() {
-  sai_attribute_t bridge_port_attr[3];
-  bridge_port_attr[0].id = SAI_BRIDGE_PORT_ATTR_TYPE;
-  bridge_port_attr[0].value.s32 = SAI_BRIDGE_PORT_TYPE_PORT;
-  bridge_port_attr[1].id = SAI_BRIDGE_PORT_ATTR_PORT_ID;
-  bridge_port_attr[1].value.oid = getDPDKPort();
-  bridge_port_attr[2].id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE;
-  bridge_port_attr[2].value.booldata = true;
-  sai_status_t status = sai_bridge_api->create_bridge_port(&gDpdkBirdgePort, gSwitchId, 3, bridge_port_attr);
-  SWSS_LOG_NOTICE("DPDK bridge port created. status = %d", status);
-}
+/* void BmToRCacheOrch::create_dpdk_bridge_port() { */
+/*   sai_attribute_t bridge_port_attr[3]; */
+/*   bridge_port_attr[0].id = SAI_BRIDGE_PORT_ATTR_TYPE; */
+/*   bridge_port_attr[0].value.s32 = SAI_BRIDGE_PORT_TYPE_PORT; */
+/*   bridge_port_attr[1].id = SAI_BRIDGE_PORT_ATTR_PORT_ID; */
+/*   bridge_port_attr[1].value.oid = getDPDKPort(); */
+/*   bridge_port_attr[2].id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE; */
+/*   bridge_port_attr[2].value.booldata = true; */
+/*   sai_status_t status = sai_bridge_api->create_bridge_port(&gDpdkBirdgePort, gSwitchId, 3, bridge_port_attr); */
+/*   SWSS_LOG_NOTICE("DPDK bridge port created. status = %d", status); */
+/* } */
 
 void BmToRCacheOrch::InitDefaultEntries() {
   SWSS_LOG_ENTER();
@@ -181,10 +181,10 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
   sai_object_id_t tunnel_term_table_entry;
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_BRIDGE_IF_TO_VNI;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
-  tunnel_map_attr[1].value.objlist.count = 0;
-  tunnel_map_attr[1].value.objlist.list = NULL;
-  status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 2, tunnel_map_attr);
+  /* tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST; */
+  /* tunnel_map_attr[1].value.objlist.count = 0; */
+  /* tunnel_map_attr[1].value.objlist.list = NULL; */
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_encap_map, gSwitchId, 1, tunnel_map_attr);
   SWSS_LOG_NOTICE("create_tunnel_map (encap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
@@ -200,35 +200,44 @@ sai_status_t BmToRCacheOrch::create_tunnel(IpAddress src_ip) {
 
   tunnel_map_attr[0].id = SAI_TUNNEL_MAP_ATTR_TYPE;
   tunnel_map_attr[0].value.s32 = SAI_TUNNEL_MAP_TYPE_VNI_TO_BRIDGE_IF;
-  tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST;
-  tunnel_map_attr[1].value.objlist.count = 0;
-  tunnel_map_attr[1].value.objlist.list = NULL;
-  status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 2, tunnel_map_attr);
+  /* tunnel_map_attr[1].id = SAI_TUNNEL_MAP_ATTR_ENTRY_LIST; */
+  /* tunnel_map_attr[1].value.objlist.count = 0; */
+  /* tunnel_map_attr[1].value.objlist.list = NULL; */
+  status = sai_tunnel_api->create_tunnel_map(&tunnel_decap_map, gSwitchId, 1, tunnel_map_attr);
   SWSS_LOG_NOTICE("create_tunnel_map (decap). status = %d\n", status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
 
-  sai_attribute_t tunnel_attr[8];
-  tunnel_attr[0].id = SAI_TUNNEL_ATTR_TYPE;
-  tunnel_attr[0].value.s32 = SAI_TUNNEL_TYPE_VXLAN;
-  tunnel_attr[1].id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
-  tunnel_attr[1].value.oid = gUnderlayIfId;
-  tunnel_attr[2].id = SAI_TUNNEL_ATTR_OVERLAY_INTERFACE;
-  tunnel_attr[2].value.oid = bm_port_oid;
-  tunnel_attr[3].id = SAI_TUNNEL_ATTR_DECAP_ECN_MODE;
-  tunnel_attr[3].value.s32 = SAI_TUNNEL_DECAP_ECN_MODE_USER_DEFINED;
-  tunnel_attr[4].id = SAI_TUNNEL_ATTR_DECAP_MAPPERS;
-  tunnel_attr[4].value.objlist.count = 1;
-  tunnel_attr[4].value.objlist.list = &tunnel_decap_map;
-  tunnel_attr[5].id = SAI_TUNNEL_ATTR_ENCAP_ECN_MODE;
-  tunnel_attr[5].value.s32 = SAI_TUNNEL_ENCAP_ECN_MODE_USER_DEFINED;
-  tunnel_attr[6].id = SAI_TUNNEL_ATTR_ENCAP_MAPPERS;
-  tunnel_attr[6].value.objlist.count = 1;
-  tunnel_attr[6].value.objlist.list = &tunnel_encap_map;
-  tunnel_attr[7].id = SAI_TUNNEL_ATTR_ENCAP_SRC_IP;
-  tunnel_attr[7].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
-  tunnel_attr[7].value.ipaddr.addr.ip4 = src_ip.getIp().ip_addr.ipv4_addr;
-  status = sai_tunnel_api->create_tunnel(&gTunnelId, gSwitchId, 8, tunnel_attr);
+  sai_attribute_t tunnel_attr;
+  vector<sai_attribute_t> tunnel_attrs;
+  tunnel_attr.id = SAI_TUNNEL_ATTR_TYPE;
+  tunnel_attr.value.s32 = SAI_TUNNEL_TYPE_VXLAN;
+  tunnel_attrs.push_back(tunnel_attr);
+  tunnel_attr.id = SAI_TUNNEL_ATTR_UNDERLAY_INTERFACE;
+  tunnel_attr.value.oid = gUnderlayIfId;
+  tunnel_attrs.push_back(tunnel_attr);
+  /* tunnel_attr.id = SAI_TUNNEL_ATTR_OVERLAY_INTERFACE; */
+  /* tunnel_attr.value.oid = bm_port_oid; */
+  /* tunnel_attrs.push_back(tunnel_attr); */
+  tunnel_attr.id = SAI_TUNNEL_ATTR_DECAP_ECN_MODE;
+  tunnel_attr.value.s32 = SAI_TUNNEL_DECAP_ECN_MODE_USER_DEFINED;
+  tunnel_attrs.push_back(tunnel_attr);
+  tunnel_attr.id = SAI_TUNNEL_ATTR_DECAP_MAPPERS;
+  tunnel_attr.value.objlist.count = 1;
+  tunnel_attr.value.objlist.list = &tunnel_decap_map;
+  tunnel_attrs.push_back(tunnel_attr);
+  tunnel_attr.id = SAI_TUNNEL_ATTR_ENCAP_ECN_MODE;
+  tunnel_attr.value.s32 = SAI_TUNNEL_ENCAP_ECN_MODE_USER_DEFINED;
+  tunnel_attrs.push_back(tunnel_attr);
+  tunnel_attr.id = SAI_TUNNEL_ATTR_ENCAP_MAPPERS;
+  tunnel_attr.value.objlist.count = 1;
+  tunnel_attr.value.objlist.list = &tunnel_encap_map;
+  tunnel_attrs.push_back(tunnel_attr);
+  tunnel_attr.id = SAI_TUNNEL_ATTR_ENCAP_SRC_IP;
+  tunnel_attr.value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
+  tunnel_attr.value.ipaddr.addr.ip4 = src_ip.getIp().ip_addr.ipv4_addr;
+  tunnel_attrs.push_back(tunnel_attr);
+  status = sai_tunnel_api->create_tunnel(&gTunnelId, gSwitchId, (uint32_t)tunnel_attrs.size(), tunnel_attrs.data());
   SWSS_LOG_NOTICE("create_tunnel ip=0x%x. status = %d\n", ntohl(src_ip.getIp().ip_addr.ipv4_addr), status);
   if (status != SAI_STATUS_SUCCESS)
     return status;
@@ -274,7 +283,7 @@ void BmToRCacheOrch::doTask(Consumer &consumer)
       doVnetTask(consumer);
     } else if (table_name == "VNET_INTF" || table_name == "VRF_INTF") {
       doVnetIntfTask(consumer);
-    } else if (table_name == "VXLAN_TUNNEL") {
+    } else if (table_name == "BMTOR_VXLAN_TUNNEL") {
       doVxlanTunnelTask(consumer);
     } else if (table_name == "ENCAP_TUNNEL_TABLE") {
         doEncapTunnelTask(consumer);
@@ -292,6 +301,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         for (std::vector<string>::iterator it_keys = keys.begin(); it_keys < keys.end(); ++it_keys) {
             SWSS_LOG_NOTICE("keys[%d] = %s", (int) (it_keys - keys.begin()), it_keys->c_str());
         }
+
 
         InitDefaultEntries();  //TODO - this should move to some init
         //create_dpdk_bridge_port(); //TODO - this should move to some init
@@ -403,7 +413,7 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
         sai_object_id_t vlan_oid = create_vlan(vid);
         // TODO - check for NULL
         // sai_object_id_t dpdk_vlan_member = add_dpdk_vlan_member(vlan_oid);
-        add_dpdk_vlan_member(vlan_oid);
+        /* add_dpdk_vlan_member(vlan_oid); */
         // TODO - check for NULL
         setVnetVlan(vnet_name, vlan_oid);
     }
@@ -503,7 +513,7 @@ sai_status_t BmToRCacheOrch::RemoveTableVhost(sai_object_id_t entry_id) {
 
 uint32_t BmToRCacheOrch::GetFreeOffset() { // TODO - this should be managed inside mlnx_sai
   std::map<sai_object_id_t, uint32_t>::iterator it; 
-  for (uint32_t i = 0; i < gVhostTableSize; i++) {
+  for (uint32_t i = 0; i < VHOST_TABLE_SIZE ; i++) {
     for (it = used_offsets.begin(); it != used_offsets.end(); ++it) {
       if (it->second == i)
         break;
@@ -513,7 +523,7 @@ uint32_t BmToRCacheOrch::GetFreeOffset() { // TODO - this should be managed insi
     }
   }
   SWSS_LOG_ERROR("Tried to add entry, but no free offset is available");
-  return gVhostTableSize;
+  return VHOST_TABLE_SIZE ;
 }
 
 sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni) {
@@ -538,7 +548,7 @@ sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddre
     return SAI_STATUS_FAILURE;
   }
   uint32_t offset = GetFreeOffset();
-  if (offset == gVhostTableSize)
+  if (offset == VHOST_TABLE_SIZE)
     return SAI_STATUS_FAILURE;
   vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
   vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_TUNNEL;
