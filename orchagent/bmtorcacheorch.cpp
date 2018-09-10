@@ -18,7 +18,7 @@ extern sai_bmtor_api_t*                sai_bmtor_api;
 extern sai_switch_api_t*               sai_switch_api;
 extern sai_port_api_t*                 sai_port_api;
 extern sai_tunnel_api_t*               sai_tunnel_api;
-extern sai_vlan_api_t*                 sai_vlan_api;
+/* extern sai_vlan_api_t*                 sai_vlan_api; */
 extern sai_bridge_api_t*               sai_bridge_api;
 
 extern PortsOrch *gPortsOrch;
@@ -26,14 +26,14 @@ extern sai_object_id_t gSwitchId;
 extern sai_object_id_t gVirtualRouterId;
 extern sai_object_id_t gUnderlayIfId;
 #define NUM_OF_VNI 32
-#define VHOST_TABLE_SIZE 256
+#define VHOST_TABLE_SIZE 8192
 
 BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
 {
     SWSS_LOG_ENTER();
     /* gDPDKVlan = 3904; */
-    gVlansStart = 120;
+    /* gVlansStart = 120; */
     gTunnelId = SAI_NULL_OBJECT_ID;
     gVnetBitmap = 0xfff;
     /* dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument? */
@@ -41,17 +41,17 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
     /* SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid); */
 }
 
-sai_object_id_t BmToRCacheOrch::create_vlan(uint16_t vid) { //TODO: change to portsorch
-  sai_attribute_t vlan_attr[1];
-  vlan_attr[0].id = SAI_VLAN_ATTR_VLAN_ID;
-  vlan_attr[0].value.u16 = vid;
-  sai_object_id_t vlan_oid;
-  sai_status_t status = sai_vlan_api->create_vlan(&vlan_oid, gSwitchId, 1, vlan_attr);
-  SWSS_LOG_NOTICE("Vlan%d created. status = %d", vid, status);
-  if (status == SAI_STATUS_SUCCESS)
-    return vlan_oid;
-  return SAI_NULL_OBJECT_ID;
-}
+/* sai_object_id_t BmToRCacheOrch::create_vlan(uint16_t vid) { //TODO: change to portsorch */
+/*   sai_attribute_t vlan_attr[1]; */
+/*   vlan_attr[0].id = SAI_VLAN_ATTR_VLAN_ID; */
+/*   vlan_attr[0].value.u16 = vid; */
+/*   sai_object_id_t vlan_oid; */
+/*   sai_status_t status = sai_vlan_api->create_vlan(&vlan_oid, gSwitchId, 1, vlan_attr); */
+/*   SWSS_LOG_NOTICE("Vlan%d created. status = %d", vid, status); */
+/*   if (status == SAI_STATUS_SUCCESS) */
+/*     return vlan_oid; */
+/*   return SAI_NULL_OBJECT_ID; */
+/* } */
 
 /* sai_object_id_t BmToRCacheOrch::add_dpdk_vlan_member(sai_object_id_t vlan_oid) { //TODO: change to portsorch */
 /*   sai_attribute_t vlan_member_attr[3]; */
@@ -402,20 +402,20 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
     sai_object_id_t port_id = sai_get_port_id_by_alias(if_name);
     SWSS_LOG_NOTICE("Vnet name %s, ifname %s,port_oid 0x%lx", vnet_name.c_str(), if_name.c_str(), port_id);
     if (op == SET_COMMAND) {
-        sai_status_t status;
-        sai_attribute_t pvid_attr;
-        uint16_t vid = get_new_vlan();
-        pvid_attr.id = SAI_PORT_ATTR_PORT_VLAN_ID;
-        pvid_attr.value.u16 = vid;
-        status = sai_port_api->set_port_attribute(port_id, &pvid_attr);
-        SWSS_LOG_NOTICE("Set port pvid %d. status %d\n", pvid_attr.value.u16, status);
+        /* sai_status_t status; */
+        /* sai_attribute_t pvid_attr; */
+        /* uint16_t vid = get_new_vlan(); */
+        /* pvid_attr.id = SAI_PORT_ATTR_PORT_VLAN_ID; */
+        /* pvid_attr.value.u16 = vid; */
+        /* status = sai_port_api->set_port_attribute(port_id, &pvid_attr); */
+        /* SWSS_LOG_NOTICE("Set port pvid %d. status %d\n", pvid_attr.value.u16, status); */
 
-        sai_object_id_t vlan_oid = create_vlan(vid);
-        // TODO - check for NULL
-        // sai_object_id_t dpdk_vlan_member = add_dpdk_vlan_member(vlan_oid);
-        /* add_dpdk_vlan_member(vlan_oid); */
-        // TODO - check for NULL
-        setVnetVlan(vnet_name, vlan_oid);
+        /* sai_object_id_t vlan_oid = create_vlan(vid); */
+        /* // TODO - check for NULL */
+        /* // sai_object_id_t dpdk_vlan_member = add_dpdk_vlan_member(vlan_oid); */
+        /* /1* add_dpdk_vlan_member(vlan_oid); *1/ */
+        /* // TODO - check for NULL */
+        /* setVnetVlan(vnet_name, vlan_oid); */
     }
     it = consumer.m_toSync.erase(it);
   }
@@ -633,50 +633,50 @@ bool BmToRCacheOrch::getTunnelIP(std::string key, IpAddress &IP)
     }
 }
 
-void BmToRCacheOrch::setVnetVlan(std::string key, sai_object_id_t Vlan)
-{
-    vnet_vlan_map[key] = Vlan;
-}
+/* void BmToRCacheOrch::setVnetVlan(std::string key, sai_object_id_t Vlan) */
+/* { */
+/*     vnet_vlan_map[key] = Vlan; */
+/* } */
 
-bool BmToRCacheOrch::getVnetVlan(std::string key, sai_object_id_t &Vlan)
-{
-    SWSS_LOG_ENTER();
+/* bool BmToRCacheOrch::getVnetVlan(std::string key, sai_object_id_t &Vlan) */
+/* { */
+/*     SWSS_LOG_ENTER(); */
 
-    if (vnet_vlan_map.find(key) == vnet_vlan_map.end())
-    {
-        return false;
-    }
-    else
-    {
-        Vlan = vnet_vlan_map[key];
-        return true;
-    }
-}
+/*     if (vnet_vlan_map.find(key) == vnet_vlan_map.end()) */
+/*     { */
+/*         return false; */
+/*     } */
+/*     else */
+/*     { */
+/*         Vlan = vnet_vlan_map[key]; */
+/*         return true; */
+/*     } */
+/* } */
 
-uint16_t BmToRCacheOrch::get_vid_from_vlan(sai_object_id_t vlan_oid) {
-  sai_attribute_t vlan_attr[1];
-  vlan_attr[0].id = SAI_VLAN_ATTR_VLAN_ID;
-  sai_vlan_api->get_vlan_attribute(vlan_oid, 1, vlan_attr);
-  return vlan_attr[0].value.u16;
-}
+/* uint16_t BmToRCacheOrch::get_vid_from_vlan(sai_object_id_t vlan_oid) { */
+/*   sai_attribute_t vlan_attr[1]; */
+/*   vlan_attr[0].id = SAI_VLAN_ATTR_VLAN_ID; */
+/*   sai_vlan_api->get_vlan_attribute(vlan_oid, 1, vlan_attr); */
+/*   return vlan_attr[0].value.u16; */
+/* } */
 
-bool BmToRCacheOrch::is_vlan_used(uint16_t vid) {
-  for (map<std::string, sai_object_id_t>::iterator it = vnet_vlan_map.begin(); it != vnet_vlan_map.end(); ++it) {
-    if (vid == get_vid_from_vlan(it->second)) {
-      return true;
-    }
-  }
-  return false;
-}
+/* bool BmToRCacheOrch::is_vlan_used(uint16_t vid) { */
+/*   for (map<std::string, sai_object_id_t>::iterator it = vnet_vlan_map.begin(); it != vnet_vlan_map.end(); ++it) { */
+/*     if (vid == get_vid_from_vlan(it->second)) { */
+/*       return true; */
+/*     } */
+/*   } */
+/*   return false; */
+/* } */
 
-uint16_t BmToRCacheOrch::get_new_vlan() {
-  for (uint16_t i=gVlansStart; i<4096; i++) {
-    if (!is_vlan_used(i)) {
-      return i;
-    }
-  }
-  return 0;
-}
+/* uint16_t BmToRCacheOrch::get_new_vlan() { */
+/*   for (uint16_t i=gVlansStart; i<4096; i++) { */
+/*     if (!is_vlan_used(i)) { */
+/*       return i; */
+/*     } */
+/*   } */
+/*   return 0; */
+/* } */
 
 sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
   Port port;
@@ -691,16 +691,16 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
   }
 }
 
-string BmToRCacheOrch::getDPDKPortIF() {
-  Port port;
-  if (gPortsOrch->getPort(dpdk_port, port)) 
-    return port.m_alias;
-  return "";
-}
+/* string BmToRCacheOrch::getDPDKPortIF() { */
+/*   Port port; */
+/*   if (gPortsOrch->getPort(dpdk_port, port)) */ 
+/*     return port.m_alias; */
+/*   return ""; */
+/* } */
 
-sai_object_id_t BmToRCacheOrch::getDPDKPort() {
-  return dpdk_port;
-}
+/* sai_object_id_t BmToRCacheOrch::getDPDKPort() { */
+/*   return dpdk_port; */
+/* } */
 
 uint16_t BmToRCacheOrch::GetVnetBitmap(uint32_t vni) {
   return gVnetBitmap;
