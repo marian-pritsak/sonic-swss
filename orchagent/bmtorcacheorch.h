@@ -11,12 +11,23 @@
 #include <map>
 #include <set>
 
+class Vnet 
+{
+public:
+    Vnet(uint16_t _bitmap_offset);
+    uint16_t GetTablePeeringBitmap();
+    void AddPeer(std::string);
+private:
+    uint16_t bitmap_offset;
+    set<std::string> peering_list;
+}
+
 class BmToRCacheOrch : public Orch
 {
 public:
     BmToRCacheOrch(DBConnector *db, vector<string> tableNames);
-    sai_object_id_t getDPDKPort();
-    string getDPDKPortIF();
+    /* sai_object_id_t getDPDKPort(); */
+    /* string getDPDKPortIF(); */
     uint16_t GetVnetBitmap(uint32_t vni);
     sai_object_id_t GetTunnelID();
     sai_status_t CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni);
@@ -33,9 +44,9 @@ private:
     void doTask(Consumer &consumer);
     sai_object_id_t gTunnelId;
     sai_object_id_t default1Qbridge;
-    sai_object_id_t gDpdkBirdgePort;
+    /* sai_object_id_t gDpdkBirdgePort; */
     sai_object_id_t default_vhost_table_entry;
-    sai_object_id_t dpdk_port;
+    /* sai_object_id_t dpdk_port; */
     sai_object_id_t bm_port_oid;
     sai_object_id_t peering_entry;
     sai_status_t create_tunnel(IpAddress src_ip);
@@ -48,6 +59,7 @@ private:
     uint16_t gVnetBitmap;
     map<std::string, sai_object_id_t> vhost_entries;
     map<std::string, IpAddress> tunnel_ip_map;
+    map<std::string, Vnet> vnet_map;
     /* map<std::string, sai_object_id_t> vnet_vlan_map; */
     bool getVhostEntry(std::string key, sai_object_id_t &entry_id);
     void setVhostEntry(std::string key, sai_object_id_t entry_id);

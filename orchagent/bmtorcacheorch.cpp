@@ -368,6 +368,22 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
     string vnet_name = kfvKey(it->second);
     string vxlan_tunnel;
     string vni_str;
+    set<int> lane_set;
+    vector<string> trap_id_list;
+    trap_id_list = tokenize(fvValue(*i), list_item_delimiter);
+
+                if (fvField(i) == "lanes")
+                {
+                    string lane_str;
+                    istringstream iss(fvValue(i));
+
+                    while (getline(iss, lane_str, ','))
+                    {
+                        int lane = stoi(lane_str);
+                        lane_set.insert(lane);
+                    }
+
+                }
     for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "vxlan_tunnel")
                 vxlan_tunnel = fvValue(i);
