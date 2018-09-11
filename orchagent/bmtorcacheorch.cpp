@@ -82,9 +82,10 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
 /*   SWSS_LOG_NOTICE("DPDK bridge port created. status = %d", status); */
 /* } */
 
-void BmToRCacheOrch::AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t bm_port_oid) {
+sai_object_id_t BmToRCacheOrch::AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t bm_port_oid) {
   SWSS_LOG_ENTER();
   sai_status_t status;
+  sai_object_id_t peering_entry;
   sai_attribute_t table_peer_attr[3];
   table_peer_attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
   table_peer_attr[0].value.s32 = SAI_TABLE_PEERING_ENTRY_ACTION_SET_VNET_BITMAP;
@@ -97,6 +98,7 @@ void BmToRCacheOrch::AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t 
       SWSS_LOG_ERROR("Failed to create table_peering entry");
       throw "BMToR configuration failure";
   }
+  return peering_entry;
 
   /* sai_attribute_t vhost_table_entry_attr[8]; */
   /* vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION; */
@@ -276,9 +278,9 @@ void BmToRCacheOrch::doTask(Consumer &consumer)
 
     string table_name = consumer.getTableName();
     if (table_name == "VNET_ROUTE_TUNNEL_TABLE") {
-      doVnetRouteTunnelTask(consumer);
-    } else if (table_name == "VNET_ROUTE_TABLE") {
-      doVnetRouteTask(consumer);
+      /* doVnetRouteTunnelTask(consumer); */
+    /* } else if (table_name == "VNET_ROUTE_TABLE") { */
+      /* doVnetRouteTask(consumer); */
     } else if (table_name == "VNET") {
       doVnetTask(consumer);
     } else if (table_name == "VNET_INTF" || table_name == "VRF_INTF") {
@@ -329,7 +331,7 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         /* uint32_t vni = stoi(vni_str); */
         std::shared_ptr<Vnet> vnet;
         if (!getVnet(vnet_name, vnet)) {
-            SWSS_LOG_ERROR("vnet_name %s doesn't exists", vnet_name->c_str());
+            SWSS_LOG_ERROR("vnet_name %s doesn't exists", vnet_name.c_str());
             throw "BMToR vhost entry addition failure";
         }
 
@@ -365,9 +367,10 @@ void BmToRCacheOrch::doVnetRouteTask(Consumer &consumer) {
 }
 
 bool BmToRCacheOrch::GetFreeVnetOffset(uint16_t &vnet_offset) {
-    for (int i=0; i< MAX_VNETS_NUM; i++) {
-        for (auto it : vnet_map) {
-            if (it.second->bitmap_offset == i)
+    std::map<std::string, std::shared_ptr<Vnet>>::iterator it;
+    for (uint16_t i=0; i< MAX_VNETS_NUM; i++) {
+        for (it = vnet_map.begin(); it != vnet_map.end(); ++it) {
+            if (it->second->bitmap_offset == i)
                 break;
         } 
         if (it == vnet_map.end()) {
@@ -394,14 +397,9 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
         if (fvField(i) == "vxlanid")
             vni_str = fvValue(i);
         if (fvField(i) == "peer_list")
-            peering_list = tokenize(fvValue(*i), list_item_delimiter);
+            peering_list = tokenize(fvValue(i), list_item_delimiter);
     }
 
-    uint32_t vni = stoi(vni_str);
-    SWSS_LOG_NOTICE("vnet_name %s. vxlan_tunnel name %s. vni_str %s, vni %d. peer_list:", vnet_name.c_str(), vxlan_tunnel.c_str(), vni_str.c_str(), vni);
-    for (auto &s : peering_list) {
-        SWSS_LOG_NOTICE("%s ", s.c_str());
-    }
     if (op == SET_COMMAND) {
         IpAddress src_ip;
         getTunnelIP(vxlan_tunnel, src_ip);
@@ -412,10 +410,15 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
           SWSS_LOG_ERROR("Tried to create more than allowed number of VNets (%d)", MAX_VNETS_NUM);
           break;
         }
-        std::shared_ptr<Vnet> vnet = std::make_shared(Vnet, vnet_offset);
+        std::shared_ptr<Vnet> vnet = std::make_shared<Vnet>(vnet_offset);
         setVnet(vnet_name, vnet);
         for (auto &s : peering_list) {
-            vnet->AddPeer(s);
+            vnet->peering_list.insert(s);
+        }
+        vnet->vni = stoi(vni_str);
+        SWSS_LOG_NOTICE("VNet created (offset %d). vnet_name %s. vxlan_tunnel name %s. vni_str %s. peer_list:", vnet->bitmap_offset, vnet_name.c_str(), vxlan_tunnel.c_str(), vni_str.c_str());
+        for (auto &s : vnet->peering_list) {
+            SWSS_LOG_NOTICE("%s ", s.c_str());
         }
     }
     it = consumer.m_toSync.erase(it);
@@ -437,7 +440,7 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
         if (fvField(i) == "vnet_name" || fvField(i) == "vrf_name")
             vnet_name = fvValue(i);
         if (!getVnet(vnet_name, vnet)) {
-            SWSS_LOG_ERROR("Created VNet intf with non-existing vnet name %s", vnet_name, vnet_name.c_str());
+            SWSS_LOG_ERROR("Created VNet intf with non-existing vnet name %s", vnet_name.c_str());
         }
     }
     sai_object_id_t port_id = sai_get_port_id_by_alias(if_name);
@@ -458,7 +461,7 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
         /* // TODO - check for NULL */
         /* setVnetVlan(vnet_name, vlan_oid); */
         uint16_t peering_bitmap = GetVnetBitmap(vnet);
-        AddTablePeeringEntry(peering_entry, port_id);
+        AddTablePeeringEntry(peering_bitmap, port_id);
     }
     it = consumer.m_toSync.erase(it);
   }
@@ -572,7 +575,7 @@ uint32_t BmToRCacheOrch::GetFreeOffset() { // TODO - this should be managed insi
 sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni, uint16_t vnet_bitmap_offset, std::string vnet_name) {
   // TODO - create key and add to vhosy_entries map in here
   SWSS_LOG_ENTER();
-  uint16_t vnet_bitmap = (1 >> vnet_bitmap_offset);
+  uint16_t vnet_bitmap = (uint16_t) (1 << vnet_bitmap_offset);
   sai_attribute_t vhost_table_entry_attr[8];
   sai_object_id_t bridgeId, mapEntry;
 
@@ -676,12 +679,12 @@ bool BmToRCacheOrch::getTunnelIP(std::string key, IpAddress &IP)
     }
 }
 
-void BmToRCacheOrch::setVnet(std::string key, std::shared_ptr<Vnet>> vnet)
+void BmToRCacheOrch::setVnet(std::string key, std::shared_ptr<Vnet> vnet)
 {
     vnet_map[key] = vnet;
 }
 
-bool BmToRCacheOrch::getVnet(std::string key, std::shared_ptr<Vnet>> &vnet)
+bool BmToRCacheOrch::getVnet(std::string key, std::shared_ptr<Vnet> &vnet)
 {
     SWSS_LOG_ENTER();
 
@@ -766,8 +769,20 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
 
 uint16_t BmToRCacheOrch::GetVnetBitmap(std::shared_ptr<Vnet> vnet) {
     uint16_t vnet_bitmap = 0;
-    vnet_bitmap |= (1 >> vnet->bitmap_offset);
+    // traffic from vnet intf can always go to its own vnet
+    vnet_bitmap = (vnet_bitmap | (uint16_t) (1 << vnet->bitmap_offset));
+    shared_ptr<Vnet> peer_vnet;
+
+    // check for peering vnets, if such exist add to bitmap
+    for (auto &peer_vnet_name : vnet->peering_list) {
+        if (getVnet(peer_vnet_name, peer_vnet)) {
+            vnet_bitmap = (vnet_bitmap | (uint16_t) (1 << peer_vnet->bitmap_offset));
+        } else {
+            SWSS_LOG_ERROR("Tried to create a vnet intf on vnet (vni %d) with bad peer (%s)", vnet->vni, peer_vnet_name.c_str());
+        }
+    }
     // TODO: PEERING!
+    return vnet_bitmap;
 }
 
 sai_object_id_t BmToRCacheOrch::GetTunnelID() {
@@ -803,3 +818,4 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_front_port(uint32_t hw_port) 
   printf("didn't find port");
   return -1;
 }
+

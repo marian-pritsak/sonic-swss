@@ -21,11 +21,11 @@ class Vnet
 {
 public:
     Vnet(uint16_t _bitmap_offset);
-    void AddPeer(std::string);
+    /* void AddPeer(std::string peer); */
     set<std::string> peering_list;
     uint32_t vni;
     uint16_t bitmap_offset;
-}
+};
 
 class BmToRCacheOrch : public Orch
 {
@@ -45,8 +45,8 @@ private:
     void doVxlanTunnelTask(Consumer &consumer);
     void doEncapTunnelTask(Consumer &consumer);
     void doTask(Consumer &consumer);
-    uint16_t GetVnetBitmap(Vnet vnet);
-    void AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t bm_port_oid);
+    uint16_t GetVnetBitmap(std::shared_ptr<Vnet> vnet);
+    sai_object_id_t AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t bm_port_oid);
     bool GetFreeVnetOffset(uint16_t &vnet_offset);
     sai_object_id_t gTunnelId;
     sai_object_id_t default1Qbridge;
@@ -74,8 +74,8 @@ private:
     void setTunnelIP(std::string key, IpAddress IP);
 
     map<std::string, std::shared_ptr<Vnet>> vnet_map;
-    bool getVnet(std::string key, std::shared_ptr<Vnet>> &vnet);
-    void setVnet(std::string key, std::shared_ptr<Vnet>> vnet);
+    bool getVnet(std::string key, std::shared_ptr<Vnet> &vnet);
+    void setVnet(std::string key, std::shared_ptr<Vnet> vnet);
 
     /* map<std::string, sai_object_id_t> vnet_vlan_map; */
     /* bool getVnetVlan(std::string key, sai_object_id_t &Vlan); */
