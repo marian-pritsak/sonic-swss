@@ -25,8 +25,9 @@ extern PortsOrch *gPortsOrch;
 extern sai_object_id_t gSwitchId;
 extern sai_object_id_t gVirtualRouterId;
 extern sai_object_id_t gUnderlayIfId;
-#define NUM_OF_VNI 32
-#define VHOST_TABLE_SIZE 8192
+
+// TODO: Move to VnetOrch?
+Vnet::Vnet(uint16_t _bitmap_offset) : bitmap_offset(_bitmap_offset) {}
 
 BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
         Orch(db, tableNames)
@@ -35,7 +36,7 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
     /* gDPDKVlan = 3904; */
     /* gVlansStart = 120; */
     gTunnelId = SAI_NULL_OBJECT_ID;
-    gVnetBitmap = 0xfff;
+    /* gVnetBitmap = 0xfff; */
     /* dpdk_port = sai_get_port_id_by_front_port(2); // TODO - argument? */
     bm_port_oid = sai_get_port_id_by_front_port(1); // TODO - why does vxlan tunnel need this as overlay interfacce? */
     /* SWSS_LOG_NOTICE("DPDK port: 0x%lx. Ethernet0:0x%lx", dpdk_port, bm_port_oid); */
@@ -81,9 +82,8 @@ BmToRCacheOrch::BmToRCacheOrch(DBConnector *db, vector<string> tableNames) :
 /*   SWSS_LOG_NOTICE("DPDK bridge port created. status = %d", status); */
 /* } */
 
-void BmToRCacheOrch::InitDefaultEntries() {
+void BmToRCacheOrch::AddTablePeeringEntry(uint16_t vnet_bitmap, sai_object_id_t bm_port_oid) {
   SWSS_LOG_ENTER();
-  uint16_t vnet_bitmap = GetVnetBitmap(8); //TODO: build this from vnet peering list and vnet_intf
   sai_status_t status;
   sai_attribute_t table_peer_attr[3];
   table_peer_attr[0].id = SAI_TABLE_PEERING_ENTRY_ATTR_ACTION;
@@ -95,7 +95,7 @@ void BmToRCacheOrch::InitDefaultEntries() {
   status = sai_bmtor_api->create_table_peering_entry(&peering_entry, gSwitchId, 3, table_peer_attr);
   if (status != SAI_STATUS_SUCCESS) {
       SWSS_LOG_ERROR("Failed to create table_peering entry");
-      throw "BMToR initialization failure";
+      throw "BMToR configuration failure";
   }
 
   /* sai_attribute_t vhost_table_entry_attr[8]; */
@@ -286,7 +286,7 @@ void BmToRCacheOrch::doTask(Consumer &consumer)
     } else if (table_name == "BMTOR_VXLAN_TUNNEL") {
       doVxlanTunnelTask(consumer);
     } else if (table_name == "ENCAP_TUNNEL_TABLE") {
-        doEncapTunnelTask(consumer);
+      doEncapTunnelTask(consumer);
     }
 }
 
@@ -303,11 +303,10 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
         }
 
 
-        InitDefaultEntries();  //TODO - this should move to some init
         //create_dpdk_bridge_port(); //TODO - this should move to some init
 
         sai_object_id_t vhost_entry;
-        string vrf_name(keys[0]);
+        string vnet_name(keys[0]);
         string overlay_prefix_str(keys[1]);
         string op = kfvOp(it->second);
         string underlay_dest_ip_str;
@@ -319,27 +318,32 @@ void BmToRCacheOrch::doEncapTunnelTask(Consumer &consumer) {
                 underlay_dest_ip_str = fvValue(i);
             if (fvField(i) == "underlay_src_ip")
                 underlay_src_ip_str = fvValue(i);
-            if (fvField(i) == "vni")
-                vni_str = fvValue(i);
+            // TODO: add support to set VNI action (currently only VNET's vni is supported)
+            /* if (fvField(i) == "vni") */
+            /*     vni_str = fvValue(i); */
         }
 
         IpAddress underlay_dest_ip(underlay_dest_ip_str);
         IpPrefix overlay_prefix(overlay_prefix_str);
-        uint32_t vni = stoi(vni_str);
+        // TODO: add support to set VNI action (currently only VNET's vni is supported)
+        /* uint32_t vni = stoi(vni_str); */
+        std::shared_ptr<Vnet> vnet;
+        if (!getVnet(vnet_name, vnet)) {
+            SWSS_LOG_ERROR("vnet_name %s doesn't exists", vnet_name->c_str());
+            throw "BMToR vhost entry addition failure";
+        }
 
         if (op == SET_COMMAND) {
-            SWSS_LOG_NOTICE("create ENCAP_TUNNEL_TABLE vrf %s. enpoint %s. underlay_dip 0x%x",
-                    vrf_name.c_str(),
+            SWSS_LOG_NOTICE("create ENCAP_TUNNEL_TABLE vnet %s. enpoint %s. underlay_dip 0x%x",
+                    vnet_name.c_str(),
                     underlay_dest_ip_str.c_str(),
                     htonl(underlay_dest_ip.getIp().ip_addr.ipv4_addr));
 
-            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), vni); 
+            status = CreateVhostEntry(&vhost_entry, underlay_dest_ip, overlay_prefix.getIp(), vnet->vni, vnet->bitmap_offset, vnet_name); 
             if (status != SAI_STATUS_SUCCESS) {
                 SWSS_LOG_ERROR("Failed to add table_vhost entry");
                 throw "BMToR vhost entry addition failure";
             }
-
-            setVhostEntry(kfvKey(it->second) + "/32", vhost_entry);
 
         } else if (op == DEL_COMMAND) {
             SWSS_LOG_NOTICE("REMOVE ENCAP_TUNNEL_TABLE");
@@ -360,6 +364,20 @@ void BmToRCacheOrch::doVnetRouteTask(Consumer &consumer) {
   SWSS_LOG_ENTER();
 }
 
+bool BmToRCacheOrch::GetFreeVnetOffset(uint16_t &vnet_offset) {
+    for (int i=0; i< MAX_VNETS_NUM; i++) {
+        for (auto it : vnet_map) {
+            if (it.second->bitmap_offset == i)
+                break;
+        } 
+        if (it == vnet_map.end()) {
+            vnet_offset = i;
+            return true;
+        }
+    }
+    return false;
+}
+
 void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
   SWSS_LOG_ENTER();
   auto it = consumer.m_toSync.begin();
@@ -368,34 +386,37 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
     string vnet_name = kfvKey(it->second);
     string vxlan_tunnel;
     string vni_str;
-    set<int> lane_set;
-    vector<string> trap_id_list;
-    trap_id_list = tokenize(fvValue(*i), list_item_delimiter);
+    vector<string> peering_list;
 
-                if (fvField(i) == "lanes")
-                {
-                    string lane_str;
-                    istringstream iss(fvValue(i));
-
-                    while (getline(iss, lane_str, ','))
-                    {
-                        int lane = stoi(lane_str);
-                        lane_set.insert(lane);
-                    }
-
-                }
     for (auto i : kfvFieldsValues(it->second)) {
-            if (fvField(i) == "vxlan_tunnel")
-                vxlan_tunnel = fvValue(i);
-            if (fvField(i) == "vxlanid")
-                vni_str = fvValue(i);
-        }
+        if (fvField(i) == "vxlan_tunnel")
+            vxlan_tunnel = fvValue(i);
+        if (fvField(i) == "vxlanid")
+            vni_str = fvValue(i);
+        if (fvField(i) == "peer_list")
+            peering_list = tokenize(fvValue(*i), list_item_delimiter);
+    }
+
     uint32_t vni = stoi(vni_str);
-    SWSS_LOG_NOTICE("vnet_name %s. vxlan_tunnel name %s. vni_str %s, vni %d", vnet_name.c_str(), vxlan_tunnel.c_str(), vni_str.c_str(), vni);
+    SWSS_LOG_NOTICE("vnet_name %s. vxlan_tunnel name %s. vni_str %s, vni %d. peer_list:", vnet_name.c_str(), vxlan_tunnel.c_str(), vni_str.c_str(), vni);
+    for (auto &s : peering_list) {
+        SWSS_LOG_NOTICE("%s ", s.c_str());
+    }
     if (op == SET_COMMAND) {
-      IpAddress src_ip;
-      getTunnelIP(vxlan_tunnel, src_ip);
-      /* create_tunnel(src_ip); */
+        IpAddress src_ip;
+        getTunnelIP(vxlan_tunnel, src_ip);
+        /* create_tunnel(src_ip); */
+
+        uint16_t vnet_offset;
+        if (!GetFreeVnetOffset(vnet_offset)) {
+          SWSS_LOG_ERROR("Tried to create more than allowed number of VNets (%d)", MAX_VNETS_NUM);
+          break;
+        }
+        std::shared_ptr<Vnet> vnet = std::make_shared(Vnet, vnet_offset);
+        setVnet(vnet_name, vnet);
+        for (auto &s : peering_list) {
+            vnet->AddPeer(s);
+        }
     }
     it = consumer.m_toSync.erase(it);
   }
@@ -408,13 +429,17 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
     string op = kfvOp(it->second);
     string key = kfvKey(it->second);
     string vnet_name;
+    std::shared_ptr<Vnet> vnet;
     vector<string> keys = tokenize(kfvKey(it->second), ':');
     string if_name = keys[0];
     /* string bm_ip_prefix_str = keys[1]; */
     for (auto i : kfvFieldsValues(it->second)) {
-            if (fvField(i) == "vnet_name" || fvField(i) == "vrf_name")
-                vnet_name = fvValue(i);
+        if (fvField(i) == "vnet_name" || fvField(i) == "vrf_name")
+            vnet_name = fvValue(i);
+        if (!getVnet(vnet_name, vnet)) {
+            SWSS_LOG_ERROR("Created VNet intf with non-existing vnet name %s", vnet_name, vnet_name.c_str());
         }
+    }
     sai_object_id_t port_id = sai_get_port_id_by_alias(if_name);
     SWSS_LOG_NOTICE("Vnet name %s, ifname %s,port_oid 0x%lx", vnet_name.c_str(), if_name.c_str(), port_id);
     if (op == SET_COMMAND) {
@@ -432,6 +457,8 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
         /* /1* add_dpdk_vlan_member(vlan_oid); *1/ */
         /* // TODO - check for NULL */
         /* setVnetVlan(vnet_name, vlan_oid); */
+        uint16_t peering_bitmap = GetVnetBitmap(vnet);
+        AddTablePeeringEntry(peering_entry, port_id);
     }
     it = consumer.m_toSync.erase(it);
   }
@@ -469,49 +496,49 @@ void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
   }
 }
 
-void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) { //TODO - insert to DPDK
-    SWSS_LOG_ENTER();
-    SWSS_LOG_NOTICE("%s", __FUNCTION__);
-    auto it = consumer.m_toSync.begin();
-    while (it != consumer.m_toSync.end()) {
-        KeyOpFieldsValuesTuple t = it->second;
-        vector<string> keys = tokenize(kfvKey(t), ':');
-        string vnet_name(keys[0]);
-        for (std::vector<string>::iterator it_keys = keys.begin(); it_keys < keys.end(); ++it_keys) {
-            SWSS_LOG_NOTICE("keys[%d] = %s", (int) (it_keys - keys.begin()), it_keys->c_str());
-        }
-        string endpoint;
-        IpPrefix overlay_dip_prefix(keys[keys.size()-1]);
-        for (auto i : kfvFieldsValues(t)) {
-            if (fvField(i) == "endpoint")                endpoint = fvValue(i);
-        }
-        string op = kfvOp(t);
-        string key = kfvKey(t);
-        IpAddress underlay_dip(endpoint);
-        sai_status_t status;
-        uint32_t vni = 8; //Get this from Vnet name
-        sai_object_id_t vhost_entry;
-        if (op == SET_COMMAND) {
-            SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. switchId = 0x%lx", gSwitchId);
-            SWSS_LOG_NOTICE("vnet %s. enpoint %s. underlay_dip 0x%x", vnet_name.c_str(), endpoint.c_str(), htonl(underlay_dip.getIp().ip_addr.ipv4_addr));
-            status = CreateVhostEntry(&vhost_entry, underlay_dip, overlay_dip_prefix.getIp(), vni); 
-            if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to add table_vhost entry");
-                throw "BMToR vhost entry addition failure";
-            }
-            setVhostEntry(key, vhost_entry);
-        } else if (op == DEL_COMMAND) {
-            SWSS_LOG_NOTICE("REMOVE VNET_ROUTE_TUNNEL_TABLE");
-            getVhostEntry(key, vhost_entry);
-            status = sai_bmtor_api->remove_table_vhost_entry(vhost_entry);
-            if (status != SAI_STATUS_SUCCESS) {
-                SWSS_LOG_ERROR("Failed to remove table_peering entry");
-                throw "BMToR vhost entry removal failure";
-            }
-        }
-        it = consumer.m_toSync.erase(it);
-    }
-}
+/* void BmToRCacheOrch::doVnetRouteTunnelTask(Consumer &consumer) { //TODO - insert to DPDK */
+/*     SWSS_LOG_ENTER(); */
+/*     SWSS_LOG_NOTICE("%s", __FUNCTION__); */
+/*     auto it = consumer.m_toSync.begin(); */
+/*     while (it != consumer.m_toSync.end()) { */
+/*         KeyOpFieldsValuesTuple t = it->second; */
+/*         vector<string> keys = tokenize(kfvKey(t), ':'); */
+/*         string vnet_name(keys[0]); */
+/*         for (std::vector<string>::iterator it_keys = keys.begin(); it_keys < keys.end(); ++it_keys) { */
+/*             SWSS_LOG_NOTICE("keys[%d] = %s", (int) (it_keys - keys.begin()), it_keys->c_str()); */
+/*         } */
+/*         string endpoint; */
+/*         IpPrefix overlay_dip_prefix(keys[keys.size()-1]); */
+/*         for (auto i : kfvFieldsValues(t)) { */
+/*             if (fvField(i) == "endpoint")                endpoint = fvValue(i); */
+/*         } */
+/*         string op = kfvOp(t); */
+/*         string key = kfvKey(t); */
+/*         IpAddress underlay_dip(endpoint); */
+/*         sai_status_t status; */
+/*         uint32_t vni = 8; //Get this from Vnet name */
+/*         sai_object_id_t vhost_entry; */
+/*         if (op == SET_COMMAND) { */
+/*             SWSS_LOG_NOTICE("create VNET_ROUTE_TUNNEL_TABLE. switchId = 0x%lx", gSwitchId); */
+/*             SWSS_LOG_NOTICE("vnet %s. enpoint %s. underlay_dip 0x%x", vnet_name.c_str(), endpoint.c_str(), htonl(underlay_dip.getIp().ip_addr.ipv4_addr)); */
+/*             status = CreateVhostEntry(&vhost_entry, underlay_dip, overlay_dip_prefix.getIp(), vni); */ 
+/*             if (status != SAI_STATUS_SUCCESS) { */
+/*                 SWSS_LOG_ERROR("Failed to add table_vhost entry"); */
+/*                 throw "BMToR vhost entry addition failure"; */
+/*             } */
+/*             setVhostEntry(key, vhost_entry); */
+/*         } else if (op == DEL_COMMAND) { */
+/*             SWSS_LOG_NOTICE("REMOVE VNET_ROUTE_TUNNEL_TABLE"); */
+/*             getVhostEntry(key, vhost_entry); */
+/*             status = sai_bmtor_api->remove_table_vhost_entry(vhost_entry); */
+/*             if (status != SAI_STATUS_SUCCESS) { */
+/*                 SWSS_LOG_ERROR("Failed to remove table_peering entry"); */
+/*                 throw "BMToR vhost entry removal failure"; */
+/*             } */
+/*         } */
+/*         it = consumer.m_toSync.erase(it); */
+/*     } */
+/* } */
 
 sai_status_t BmToRCacheOrch::RemoveTableVhost(sai_object_id_t entry_id) {
   SWSS_LOG_ENTER();
@@ -542,14 +569,14 @@ uint32_t BmToRCacheOrch::GetFreeOffset() { // TODO - this should be managed insi
   return VHOST_TABLE_SIZE ;
 }
 
-sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni) {
+sai_status_t BmToRCacheOrch::CreateVhostEntry(sai_object_id_t *entry_id, IpAddress underlay_dip, IpAddress overlay_dip, uint32_t vni, uint16_t vnet_bitmap_offset, std::string vnet_name) {
   // TODO - create key and add to vhosy_entries map in here
   SWSS_LOG_ENTER();
+  uint16_t vnet_bitmap = (1 >> vnet_bitmap_offset);
   sai_attribute_t vhost_table_entry_attr[8];
-  uint16_t vnet_bitmap = GetVnetBitmap(vni);
   sai_object_id_t bridgeId, mapEntry;
 
-  std::string key = "Vnet_" + to_string(vni) + ":" +  overlay_dip.to_string() + "/32";
+  std::string key = vnet_name + ":" +  overlay_dip.to_string() + "/32";
   SWSS_LOG_NOTICE("[debug] Looking up key %s", key.c_str());
 
   sai_status_t status = getBridgeMapEntryByVni(vni, bridgeId, mapEntry);
@@ -649,6 +676,25 @@ bool BmToRCacheOrch::getTunnelIP(std::string key, IpAddress &IP)
     }
 }
 
+void BmToRCacheOrch::setVnet(std::string key, std::shared_ptr<Vnet>> vnet)
+{
+    vnet_map[key] = vnet;
+}
+
+bool BmToRCacheOrch::getVnet(std::string key, std::shared_ptr<Vnet>> &vnet)
+{
+    SWSS_LOG_ENTER();
+
+    if (vnet_map.find(key) == vnet_map.end())
+    {
+        return false;
+    }
+    else
+    {
+        vnet = vnet_map[key];
+        return true;
+    }
+}
 /* void BmToRCacheOrch::setVnetVlan(std::string key, sai_object_id_t Vlan) */
 /* { */
 /*     vnet_vlan_map[key] = Vlan; */
@@ -718,8 +764,10 @@ sai_object_id_t BmToRCacheOrch::sai_get_port_id_by_alias(std::string alias) {
 /*   return dpdk_port; */
 /* } */
 
-uint16_t BmToRCacheOrch::GetVnetBitmap(uint32_t vni) {
-  return gVnetBitmap;
+uint16_t BmToRCacheOrch::GetVnetBitmap(std::shared_ptr<Vnet> vnet) {
+    uint16_t vnet_bitmap = 0;
+    vnet_bitmap |= (1 >> vnet->bitmap_offset);
+    // TODO: PEERING!
 }
 
 sai_object_id_t BmToRCacheOrch::GetTunnelID() {
