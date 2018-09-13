@@ -12,7 +12,7 @@
 #include <set>
 #include <memory>
 
-#define NUM_OF_VNI 32
+#define NUM_OF_VNI 900
 #define VHOST_TABLE_SIZE 8192
 #define MAX_VNETS_NUM 12
 
