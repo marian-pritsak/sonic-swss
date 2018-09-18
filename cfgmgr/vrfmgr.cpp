@@ -20,6 +20,50 @@ VrfMgr::VrfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, con
     {
         m_freeTables.emplace(i);
     }
+
+    /* Get existing VRFs from Linux */
+    stringstream cmd;
+    string res;
+
+    cmd << IP_CMD << " -d link show type vrf";
+    int ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command %s failed, rc: %i", res.c_str(), ret);
+    }
+
+    enum IpShowRowType
+    {
+        LINK_ROW,
+        MAC_ROW,
+        DETAILS_ROW,
+    };
+
+    string vrfName;
+    uint32_t table;
+    IpShowRowType rowType = LINK_ROW;
+    const auto& rows = tokenize(res, '\n');
+    for (const auto& row : rows)
+    {
+        const auto& items = tokenize(row, ' ');
+        switch(rowType)
+        {
+            case LINK_ROW:
+                vrfName = items[1];
+                vrfName.pop_back();
+                rowType = MAC_ROW;
+                break;
+            case MAC_ROW:
+                rowType = DETAILS_ROW;
+                break;
+            case DETAILS_ROW:
+                table = static_cast<uint32_t>(stoul(items[6]));
+                m_vrfTableMap[vrfName] = table;
+                m_freeTables.erase(table);
+                rowType = LINK_ROW;
+                break;
+        }
+    }
 }
 
 uint32_t VrfMgr::getFreeTable(void)
@@ -37,7 +81,7 @@ uint32_t VrfMgr::getFreeTable(void)
     return table;
 }
 
-void VrfMgr::returnTable(uint32_t table)
+void VrfMgr::recycleTable(uint32_t table)
 {
     SWSS_LOG_ENTER();
 
@@ -56,8 +100,6 @@ bool VrfMgr::delLink(const string& vrfName)
         return false;
     }
 
-    returnTable(m_vrfTableMap[vrfName]);
-
     cmd << IP_CMD << " link del " << vrfName;
     int ret = swss::exec(cmd.str(), res);
     if (ret)
@@ -66,6 +108,7 @@ bool VrfMgr::delLink(const string& vrfName)
         return false;
     }
 
+    recycleTable(m_vrfTableMap[vrfName]);
     m_vrfTableMap.erase(vrfName);
 
     return true;
@@ -77,6 +120,11 @@ bool VrfMgr::setLink(const string& vrfName)
 
     stringstream cmd;
     string res;
+
+    if (m_vrfTableMap.find(vrfName) != m_vrfTableMap.end())
+    {
+        return true;
+    }
 
     uint32_t table = getFreeTable();
     if (table == 0)
