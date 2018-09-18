@@ -13,6 +13,9 @@ using namespace swss;
 
 #define VLAN_PREFIX         "Vlan"
 #define LAG_PREFIX          "PortChannel"
+#define VNET_PREFIX         "Vnet"
+
+#define STATE_VRF_TABLE_NAME "VRF_TABLE"
 
 IntfMgr::IntfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, const vector<string> &tableNames) :
         Orch(cfgDb, tableNames),
@@ -21,6 +24,7 @@ IntfMgr::IntfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
         m_statePortTable(stateDb, STATE_PORT_TABLE_NAME),
         m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME),
         m_stateVlanTable(stateDb, STATE_VLAN_TABLE_NAME),
+        m_stateVrfTable(stateDb, STATE_VRF_TABLE_NAME),
         m_appIntfTableProducer(appDb, APP_INTF_TABLE_NAME)
 {
 }
@@ -63,6 +67,14 @@ bool IntfMgr::isIntfStateOk(const string &alias)
             return true;
         }
     }
+    else if (!alias.compare(0, strlen(VNET_PREFIX), VNET_PREFIX))
+    {
+        if (m_stateVrfTable.get(alias, temp))
+        {
+            SWSS_LOG_DEBUG("Vnet %s is ready", alias.c_str());
+            return true;
+        }
+    }
     else if (m_statePortTable.get(alias, temp))
     {
         SWSS_LOG_DEBUG("Port %s is ready", alias.c_str());
@@ -89,6 +101,19 @@ void IntfMgr::doTask(Consumer &consumer)
             continue;
         }
 
+        const vector<FieldValueTuple>& data = kfvFieldsValues(t);
+        string vnet_name = "";
+
+        for (auto idx : data)
+        {
+            const auto &field = fvField(idx);
+            const auto &value = fvValue(idx);
+            if (field == "vnet_name")
+            {
+                vnet_name = value;
+            }
+        }
+
         string alias(keys[0]);
         IpPrefix ip_prefix(keys[1]);
 
@@ -107,6 +132,14 @@ void IntfMgr::doTask(Consumer &consumer)
                 it++;
                 continue;
             }
+
+            if (!vnet_name.empty() && !isIntfStateOk(vnet_name))
+            {
+                SWSS_LOG_DEBUG("VRF is not ready, skipping %s", kfvKey(t).c_str());
+                it++;
+                continue;
+            }
+
             setIntfIp(alias, "add", ip_prefix.to_string(), ip_prefix.isV4());
         }
         else if (op == DEL_COMMAND)

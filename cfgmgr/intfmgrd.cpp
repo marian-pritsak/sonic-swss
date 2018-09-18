@@ -15,6 +15,8 @@ using namespace swss;
 /* select() function timeout retry time, in millisecond */
 #define SELECT_TIMEOUT 1000
 
+#define CFG_VNET_INTF_TABLE_NAME "VNET_INTF"
+
 /*
  * Following global variables are defined here for the purpose of
  * using existing Orch class which is to be refactored soon to
@@ -42,6 +44,7 @@ int main(int argc, char **argv)
     {
         vector<string> cfg_intf_tables = {
             CFG_INTF_TABLE_NAME,
+            CFG_VNET_INTF_TABLE_NAME,
             CFG_LAG_INTF_TABLE_NAME,
             CFG_VLAN_INTF_TABLE_NAME,
         };
