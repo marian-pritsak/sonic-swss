@@ -22,6 +22,7 @@ private:
     Table m_statePortTable, m_stateLagTable, m_stateVlanTable, m_stateVrfTable;
 
     bool setIntfIp(const string &alias, const string &opCmd, const string &ipPrefixStr, const bool ipv4 = true);
+    bool setIntfVrf(const string &alias, const string vrfName);
     void doTask(Consumer &consumer);
     bool isIntfStateOk(const string &alias);
 };

@@ -12,7 +12,8 @@ int main(int argc, char **argv)
 {
     swss::Logger::linkToDbNative("intfsyncd");
     DBConnector db(APPL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
-    IntfSync sync(&db);
+    DBConnector cfgDb(CONFIG_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
+    IntfSync sync(&db, &cfgDb);
 
     NetDispatcher::getInstance().registerMessageHandler(RTM_NEWADDR, &sync);
     NetDispatcher::getInstance().registerMessageHandler(RTM_DELADDR, &sync);

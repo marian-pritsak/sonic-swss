@@ -13,8 +13,9 @@
 using namespace std;
 using namespace swss;
 
-IntfSync::IntfSync(DBConnector *db) :
-    m_intfTable(db, APP_INTF_TABLE_NAME)
+IntfSync::IntfSync(DBConnector *db, DBConnector *cfgDb) :
+    m_intfTable(db, APP_INTF_TABLE_NAME),
+    m_cfgIntfTable(cfgDb, CFG_INTF_TABLE_NAME)
 {
 }
 
@@ -25,6 +26,7 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
     string key;
     string scope = "global";
     string family;
+    string vrf;
 
     if ((nlmsg_type != RTM_NEWADDR) && (nlmsg_type != RTM_GETADDR) &&
         (nlmsg_type != RTM_DELADDR))
@@ -46,9 +48,12 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
         return;
 
     key = LinkCache::getInstance().ifindexToName(rtnl_addr_get_ifindex(addr));
+    auto alias = key;
     key+= ":";
+    alias += "|";
     nl_addr2str(rtnl_addr_get_local(addr), addrStr, MAX_ADDR_SIZE);
     key+= addrStr;
+    alias+= addrStr;
     if (nlmsg_type == RTM_DELADDR)
     {
         m_intfTable.del(key);
@@ -60,5 +65,16 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
     FieldValueTuple s("scope", scope);
     fvVector.push_back(s);
     fvVector.push_back(f);
+
+    vector<FieldValueTuple> temp;
+    if (m_cfgIntfTable.get(alias, temp))
+        for (const auto& fv : temp)
+        {
+            if (fvField(fv) == "vnet_name")
+            {
+                fvVector.emplace_back("vrf_name", fvValue(fv));
+            }
+        }
+
     m_intfTable.set(key, fvVector);
 }

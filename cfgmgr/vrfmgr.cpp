@@ -11,10 +11,14 @@
 #define VRF_TABLE_START 100
 #define VRF_TABLE_END 164
 
+#define STATE_VRF_TABLE_NAME "VRF_TABLE"
+
 using namespace swss;
 
 VrfMgr::VrfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, const vector<string> &tableNames) :
-        Orch(cfgDb, tableNames)
+        Orch(cfgDb, tableNames),
+        m_appVrfTableProducer(appDb, CFG_VRF_TABLE_NAME),
+        m_stateVrfTable(stateDb, STATE_VRF_TABLE_NAME)
 {
     for (uint32_t i = VRF_TABLE_START; i < VRF_TABLE_END; i++)
     {
@@ -154,6 +158,13 @@ void VrfMgr::doTask(Consumer &consumer)
                 SWSS_LOG_ERROR("Failed to create vrf netdev %s", vrfName.c_str());
             }
 
+            m_appVrfTableProducer.set(vrfName, kfvFieldsValues(t));
+
+            vector<FieldValueTuple> fvVector;
+            /* FieldValueTuple s("state", "ok"); */
+            fvVector.emplace_back("state", "ok");
+            m_stateVrfTable.set(vrfName, fvVector);
+
             SWSS_LOG_NOTICE("Created vrf netdev %s", vrfName.c_str());
         }
         else if (op == DEL_COMMAND)
@@ -162,6 +173,10 @@ void VrfMgr::doTask(Consumer &consumer)
             {
                 SWSS_LOG_ERROR("Failed to remove vrf netdev %s", vrfName.c_str());
             }
+
+            m_appVrfTableProducer.del(vrfName);
+
+            m_stateVrfTable.del(vrfName);
 
             SWSS_LOG_NOTICE("Removed vrf netdev %s", vrfName.c_str());
         }

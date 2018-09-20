@@ -12,12 +12,13 @@ class IntfSync : public NetMsg
 public:
     enum { MAX_ADDR_SIZE = 64 };
 
-    IntfSync(DBConnector *db);
+    IntfSync(DBConnector *db, DBConnector *cfgDb);
 
     virtual void onMsg(int nlmsg_type, struct nl_object *obj);
 
 private:
     ProducerStateTable m_intfTable;
+    Table m_cfgIntfTable;
 };
 
 }

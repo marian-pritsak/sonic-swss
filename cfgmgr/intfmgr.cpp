@@ -47,6 +47,23 @@ bool IntfMgr::setIntfIp(const string &alias, const string &opCmd,
     return (ret == 0);
 }
 
+bool IntfMgr::setIntfVrf(const string &alias, const string vrfName)
+{
+    stringstream cmd;
+    string res;
+
+    if (!vrfName.empty())
+    {
+        cmd << IP_CMD << " link set " << alias << " master " << vrfName;
+    }
+    else
+    {
+        cmd << IP_CMD << " link set " << alias << " nomaster";
+    }
+    int ret = swss::exec(cmd.str(), res);
+    return (ret == 0);
+}
+
 bool IntfMgr::isIntfStateOk(const string &alias)
 {
     vector<FieldValueTuple> temp;
@@ -133,17 +150,24 @@ void IntfMgr::doTask(Consumer &consumer)
                 continue;
             }
 
-            if (!vnet_name.empty() && !isIntfStateOk(vnet_name))
+            if (!vnet_name.empty())
             {
-                SWSS_LOG_DEBUG("VRF is not ready, skipping %s", kfvKey(t).c_str());
-                it++;
-                continue;
+                if (!isIntfStateOk(vnet_name))
+                {
+                    SWSS_LOG_DEBUG("VRF is not ready, skipping %s", kfvKey(t).c_str());
+                    it++;
+                    continue;
+                }
+
+                setIntfVrf(alias, vnet_name);
             }
 
             setIntfIp(alias, "add", ip_prefix.to_string(), ip_prefix.isV4());
+
         }
         else if (op == DEL_COMMAND)
         {
+            setIntfVrf(alias, "");
             setIntfIp(alias, "del", ip_prefix.to_string(), ip_prefix.isV4());
         }
         else

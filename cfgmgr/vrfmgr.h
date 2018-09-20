@@ -27,6 +27,9 @@ private:
 
     map<string, uint32_t> m_vrfTableMap;
     set<uint32_t> m_freeTables;
+
+    ProducerStateTable m_appVrfTableProducer;
+    Table m_stateVrfTable;
 };
 
 }
