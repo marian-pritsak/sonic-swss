@@ -5,7 +5,8 @@
 #include <sx/sxd/sxd_dpt.h>
 #include <errno.h>
 
-#define BRIDGE_START 4998
+#define BRIDGE_START 4097
+#define NUM_BRIDGES 900
 
 #define SX_PORT_PHY_ID_MASK  (0x0000FF00)
 #define SX_PORT_PHY_ID_ISO(id)  ((id) & (SX_PORT_PHY_ID_MASK))
@@ -60,22 +61,25 @@ int main(int argc, char *argv[]) {
     sftr_reg_meta.dev_id = 1;
     sftr_reg_meta.access_cmd = SXD_ACCESS_CMD_ADD;
 
-    sftr_reg_data.swid = 0;
-    sftr_reg_data.index = BRIDGE_START - 4096;
-    sftr_reg_data.range = 0;
-    sftr_reg_data.flood_table = 1;
-    sftr_reg_data.table_type = SFGC_TABLE_TYPE_FID;
-    port_phy_id = SX_PORT_PHY_ID_GET(SX_FDB_ROUTER_PORT(0));
-    sftr_reg_data.mask_bitmap[port_phy_id] = 1;
-    sftr_reg_data.ports_bitmap[port_phy_id] = 1;
+    for (int i = BRIDGE_START; i < BRIDGE_START + NUM_BRIDGES; i++) {
 
-    sxd_ret = sxd_access_reg_sftr(&sftr_reg_data, &sftr_reg_meta, 1, NULL, NULL);
-    if (SXD_CHECK_FAIL(sxd_ret)) {
-        printf("sxd_access_reg_sftr error %s.\n", SXD_STATUS_MSG(sxd_ret));
-        return 1;
+        sftr_reg_data.swid = 0;
+        sftr_reg_data.index = i - 4096;
+        sftr_reg_data.range = 0;
+        sftr_reg_data.flood_table = 1;
+        sftr_reg_data.table_type = SFGC_TABLE_TYPE_FID;
+        port_phy_id = SX_PORT_PHY_ID_GET(SX_FDB_ROUTER_PORT(0));
+        sftr_reg_data.mask_bitmap[port_phy_id] = 1;
+        sftr_reg_data.ports_bitmap[port_phy_id] = 1;
+
+        sxd_ret = sxd_access_reg_sftr(&sftr_reg_data, &sftr_reg_meta, 1, NULL, NULL);
+        if (SXD_CHECK_FAIL(sxd_ret)) {
+            printf("sxd_access_reg_sftr error %s.\n", SXD_STATUS_MSG(sxd_ret));
+            return 1;
+        }
     }
 
-    for (int i = -4; i < 2; i++) {
+    for (int i = 0; i < 2; i++) {
         for (int k = 0; k < 3; k++) {
             sftr_reg_meta.swid = 0;
             sftr_reg_meta.dev_id = 1;

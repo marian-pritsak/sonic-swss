@@ -16,6 +16,8 @@
 #define VHOST_TABLE_SIZE 8192
 #define MAX_VNETS_NUM 12
 
+#define BMTOR_A1
+
 // TODO: Move to VnetOrch?
 class Vnet 
 {
@@ -25,6 +27,10 @@ public:
     set<std::string> peering_list;
     uint32_t vni;
     uint16_t bitmap_offset;
+#ifdef BMTOR_A1
+    sai_object_id_t bridge_rif;
+    sai_object_id_t bridge_port;
+#endif
 };
 
 class BmToRCacheOrch : public Orch

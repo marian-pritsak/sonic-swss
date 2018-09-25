@@ -11,8 +11,10 @@
 #include "tokenize.h"
 /* #include "bmt_common.h" */
 
+extern sai_object_id_t gVirtualRouterId;
+extern MacAddress gMacAddress;
 
-// extern sai_router_interface_api_t*  sai_router_intfs_api;
+extern sai_router_interface_api_t*  sai_router_intfs_api;
 // extern sai_route_api_t*             sai_route_api;
 extern sai_bmtor_api_t*                sai_bmtor_api;
 extern sai_switch_api_t*               sai_switch_api;
@@ -420,6 +422,63 @@ void BmToRCacheOrch::doVnetTask(Consumer &consumer) {
         for (auto &s : vnet->peering_list) {
             SWSS_LOG_NOTICE("%s ", s.c_str());
         }
+
+#ifdef BMTOR_A1
+        sai_object_id_t bridgeId, mapEntry;
+        sai_status_t status = getBridgeMapEntryByVni(vnet->vni, bridgeId, mapEntry);
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_ERROR("Failed to get bridge and map entry for vni %d", vnet->vni);
+        }
+
+        sai_attribute_t attr;
+        vector<sai_attribute_t> rif_attrs;
+
+        attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
+        attr.value.oid = gVirtualRouterId;
+        rif_attrs.push_back(attr);
+
+        attr.id = SAI_ROUTER_INTERFACE_ATTR_SRC_MAC_ADDRESS;
+        memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
+        rif_attrs.push_back(attr);
+
+        attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
+        attr.value.s32 = SAI_ROUTER_INTERFACE_TYPE_BRIDGE;
+        rif_attrs.push_back(attr);
+
+        status = sai_router_intfs_api->create_router_interface(&vnet->bridge_rif, gSwitchId, (uint32_t)rif_attrs.size(), rif_attrs.data());
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_ERROR("Failed to create rif");
+        }
+        SWSS_LOG_NOTICE("Created RIF");
+
+        vector<sai_attribute_t> bp_attrs;
+
+        attr.id = SAI_BRIDGE_PORT_ATTR_TYPE;
+        attr.value.s32 = SAI_BRIDGE_PORT_TYPE_1D_ROUTER;
+        bp_attrs.push_back(attr);
+
+        attr.id = SAI_BRIDGE_PORT_ATTR_RIF_ID;
+        attr.value.oid = vnet->bridge_rif;
+        bp_attrs.push_back(attr);
+
+        attr.id = SAI_BRIDGE_PORT_ATTR_BRIDGE_ID;
+        attr.value.oid = bridgeId;
+        bp_attrs.push_back(attr);
+
+        attr.id = SAI_BRIDGE_PORT_ATTR_FDB_LEARNING_MODE;
+        attr.value.s32 = SAI_BRIDGE_PORT_FDB_LEARNING_MODE_DISABLE;
+        bp_attrs.push_back(attr);
+
+        status = sai_bridge_api->create_bridge_port(&vnet->bridge_port, gSwitchId, (uint32_t)bp_attrs.size(), bp_attrs.data());
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_ERROR("Failed to create bp");
+        }
+        SWSS_LOG_NOTICE("Created BP");
+#endif
+
     }
     it = consumer.m_toSync.erase(it);
   }
