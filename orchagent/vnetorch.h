@@ -72,6 +72,16 @@ public:
         return tunnel_;
     }
 
+    virtual bool addVlan(uint16_t vlan_id)
+    {
+        return false;
+    }
+
+    virtual bool addIntf(Port& port, IpPrefix *prefix)
+    {
+        return false;
+    }
+
     virtual ~VNetObject() {};
 
 private:
@@ -114,6 +124,68 @@ public:
 private:
     string vnet_name_;
     vrid_list_t vr_ids_;
+};
+
+class VNetBitmapObject: public VNetObject
+{
+public:
+    VNetBitmapObject(const string& vnet, string& tunnel, set<string>& peer, vector<sai_attribute_t>& attrs);
+
+    sai_object_id_t getVRidIngress() const
+    {
+        return SAI_NULL_OBJECT_ID;
+    }
+
+    sai_object_id_t getVRidEgress() const
+    {
+        return SAI_NULL_OBJECT_ID;
+    }
+
+    set<sai_object_id_t> getVRids() const
+    {
+        return { SAI_NULL_OBJECT_ID };
+    }
+
+    virtual sai_object_id_t getEncapMapId() const
+    {
+        return getVRidIngress();
+    }
+
+    virtual sai_object_id_t getDecapMapId() const
+    {
+        return getVRidEgress();
+    }
+
+    virtual sai_object_id_t getVRid() const
+    {
+        return getVRidIngress();
+    }
+
+    virtual bool addVlan(uint16_t vlan_id);
+
+    virtual bool addIntf(Port& port, IpPrefix *prefix);
+
+    virtual bool updateObj(vector<sai_attribute_t>&);
+
+    virtual ~VNetBitmapObject()
+    {}
+
+private:
+    static uint32_t getFreeBitmapId(const string& name);
+    static uint32_t getBitmapId(const string& name);
+    static void recycleBitmapId(uint32_t id);
+    static uint32_t getFreeVnetTableOffset();
+    static void recycleVnetTableOffset(uint32_t offset);
+    static uint32_t getFreeTunnelRouteTableOffset();
+    static void recycleTunnelRouteTableOffset(uint32_t offset);
+    static uint32_t vnetBitmap_;
+    static map<string, uint32_t> vnetIds_;
+    static set<uint32_t> vnetOffsets_;
+    static set<uint32_t> tunnelOffsets_;
+
+    set<string> peers_;
+    uint32_t vnet_id_;
+    string vnet_name_;
 };
 
 typedef std::unique_ptr<VNetObject> VNetObject_T;
@@ -169,6 +241,9 @@ public:
     {
         return (vnet_exec_ == VNET_EXEC::VNET_EXEC_BRIDGE);
     }
+
+    bool addVlan(const string& name, uint16_t vlan_id);
+    bool addIntf(Port& port, const string& name, IpPrefix *prefix);
 
 private:
     virtual bool addOperation(const Request& request);
