@@ -49,28 +49,7 @@ class VNetObject
 public:
     VNetObject(string& tunName, set<string>& peer) : tunnel_(tunName), peer_list_(peer) { }
 
-    virtual sai_object_id_t getEncapMapId() const = 0;
-
-    virtual sai_object_id_t getDecapMapId() const = 0;
-
     virtual bool updateObj(vector<sai_attribute_t>&) = 0;
-
-    void setPeerList(set<string>& p_list)
-    {
-        peer_list_ = p_list;
-    }
-
-    virtual sai_object_id_t getVRid() const = 0;
-
-    const set<string>& getPeerList() const
-    {
-        return peer_list_;
-    }
-
-    string getTunnelName() const
-    {
-        return tunnel_;
-    }
 
     virtual bool addIntf(Port& port, IpPrefix *prefix)
     {
@@ -85,6 +64,21 @@ public:
     virtual bool addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
     {
         return false;
+    }
+
+    void setPeerList(set<string>& p_list)
+    {
+        peer_list_ = p_list;
+    }
+
+    const set<string>& getPeerList() const
+    {
+        return peer_list_;
+    }
+
+    string getTunnelName() const
+    {
+        return tunnel_;
     }
 
     virtual ~VNetObject() {};
@@ -105,21 +99,6 @@ public:
 
     set<sai_object_id_t> getVRids() const;
 
-    virtual sai_object_id_t getEncapMapId() const
-    {
-        return getVRidIngress();
-    }
-
-    virtual sai_object_id_t getDecapMapId() const
-    {
-        return getVRidEgress();
-    }
-
-    virtual sai_object_id_t getVRid() const
-    {
-        return getVRidIngress();
-    }
-
     bool createObj(vector<sai_attribute_t>&);
 
     bool updateObj(vector<sai_attribute_t>&);
@@ -136,37 +115,6 @@ class VNetBitmapObject: public VNetObject
 public:
     VNetBitmapObject(const string& vnet, string& tunnel, set<string>& peer, vector<sai_attribute_t>& attrs);
 
-    sai_object_id_t getVRidIngress() const
-    {
-        return SAI_NULL_OBJECT_ID;
-    }
-
-    sai_object_id_t getVRidEgress() const
-    {
-        return SAI_NULL_OBJECT_ID;
-    }
-
-    set<sai_object_id_t> getVRids() const
-    {
-        return { SAI_NULL_OBJECT_ID };
-    }
-
-    virtual sai_object_id_t getEncapMapId() const
-    {
-        return getVRidIngress();
-    }
-
-    virtual sai_object_id_t getDecapMapId() const
-    {
-        return getVRidEgress();
-    }
-
-    virtual sai_object_id_t getVRid() const
-    {
-        return getVRidIngress();
-    }
-
-    virtual bool addVlan(uint16_t vlan_id);
 
     virtual bool addIntf(Port& port, IpPrefix *prefix);
 
@@ -187,6 +135,8 @@ private:
     static map<string, uint32_t> vnetIds_;
     static set<uint32_t> vnetOffsets_;
     static set<uint32_t> tunnelOffsets_;
+
+    bool addVlan(uint16_t vlan_id);
 
     set<string> peers_;
     uint32_t vnet_id_;
@@ -212,24 +162,9 @@ public:
         return vnet_table_.at(name).get();
     }
 
-    sai_object_id_t getEncapMapId(const std::string& name) const
-    {
-        return vnet_table_.at(name)->getEncapMapId();
-    }
-
-    sai_object_id_t getDecapMapId(const std::string& name) const
-    {
-        return vnet_table_.at(name)->getDecapMapId();
-    }
-
     const set<string>& getPeerList(const std::string& name) const
     {
         return vnet_table_.at(name)->getPeerList();
-    }
-
-    sai_object_id_t getVRid(const std::string& name) const
-    {
-        return vnet_table_.at(name)->getVRid();
     }
 
     string getTunnelName(const std::string& name) const
