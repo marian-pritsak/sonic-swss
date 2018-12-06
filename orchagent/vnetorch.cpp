@@ -708,40 +708,6 @@ bool VNetRouteOrch::doRouteTask(const string& vnet, IpPrefix& ipPrefix, tunnelEn
     VNetObject *vnet_obj = vnet_orch_->getVnetPtr(vnet);
 
     return vnet_obj->addTunnelRoute(ipPrefix, endp);
-
-    /* set<sai_object_id_t> vr_set; */
-    /* auto& peer_list = vnet_orch_->getPeerList(vnet); */
-
-    /* auto l_fn = [&] (const string& vnet) { */
-    /*     auto *vnet_obj = vnet_orch_->getTypePtr<VNetVrfObject>(vnet); */
-    /*     sai_object_id_t vr_id = vnet_obj->getVRidIngress(); */
-    /*     vr_set.insert(vr_id); */
-    /* }; */
-
-    /* l_fn(vnet); */
-    /* for (auto peer : peer_list) */
-    /* { */
-    /*     if (!vnet_orch_->isVnetExists(peer)) */
-    /*     { */
-    /*         SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str()); */
-    /*         return false; */
-    /*     } */
-    /*     l_fn(peer); */
-    /* } */
-
-    /* sai_ip_prefix_t pfx; */
-    /* copy(pfx, ipPrefix); */
-    /* sai_object_id_t nh_id = getNextHop(vnet, endp); */
-
-    /* for (auto vr_id : vr_set) */
-    /* { */
-    /*     if(!add_route(vr_id, pfx, nh_id)) */
-    /*     { */
-    /*         SWSS_LOG_ERROR("Route add failed for %s", ipPrefix.to_string().c_str()); */
-    /*         break; */
-    /*     } */
-    /* } */
-    /* return true; */
 }
 
 bool VNetRouteOrch::doRouteTask(const string& vnet, IpPrefix& ipPrefix, string& ifname)
