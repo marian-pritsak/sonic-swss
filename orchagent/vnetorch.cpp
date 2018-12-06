@@ -32,11 +32,115 @@ extern sai_object_id_t gVirtualRouterId;
  */
 std::vector<VR_TYPE> vr_cntxt;
 
-VNetVrfObject::VNetVrfObject(const std::string& vnet, string& tunnel, set<string>& peer,
-                             vector<sai_attribute_t>& attrs) : VNetObject(tunnel, peer)
+VNetVrfObject::VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const std::string& vnet, string& tunnel, set<string>& peer,
+                             vector<sai_attribute_t>& attrs) : VNetObject(vnetName, vnetOrch, tunnel, peer)
 {
-    vnet_name_ = vnet;
     createObj(attrs);
+}
+
+bool VNetVrfObject::addRoute(IpPrefix& ipPrefix, string& ifname)
+{
+    SWSS_LOG_ENTER();
+
+    Port p;
+    if (!gPortsOrch->getPort(ifname, p) || (p.m_rif_id == SAI_NULL_OBJECT_ID))
+    {
+        SWSS_LOG_WARN("Port/RIF %s doesn't exist", ifname.c_str());
+        return false;
+    }
+
+    set<sai_object_id_t> vr_set;
+    auto& peer_list = getPeerList();
+    vr_set.insert(getVRidEgress());
+
+    auto l_fn = [&] (const string& vnet) {
+        auto *vnet_obj = dynamic_cast<VNetVrfObject*>(getVnetOrch()->getVnetPtr(vnet));
+        sai_object_id_t vr_id = vnet_obj->getVRidIngress();
+        vr_set.insert(vr_id);
+    };
+
+    for (auto peer : peer_list)
+    {
+        if (!getVnetOrch()->isVnetExists(peer))
+        {
+            SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str());
+            return false;
+        }
+        l_fn(peer);
+    }
+
+    sai_ip_prefix_t pfx;
+    copy(pfx, ipPrefix);
+
+    for (auto vr_id : vr_set)
+    {
+        if(!add_route(vr_id, pfx, p.m_rif_id))
+        {
+            SWSS_LOG_ERROR("Route add failed for %s", ipPrefix.to_string().c_str());
+            break;
+        }
+    }
+
+    return true;
+}
+
+sai_object_id_t VNetVrfObject::getNextHop(tunnelEndpoint& endp)
+{
+    if (nh_map_.find(endp.ip) != nh_map_.end())
+    {
+        return nh_map_.at(endp.ip);
+    }
+
+    sai_object_id_t nh_id = SAI_NULL_OBJECT_ID;
+    auto tun_name = getTunnelName();
+
+    VxlanTunnelOrch* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>();
+
+    nh_id = vxlan_orch->createNextHopTunnel(tun_name, endp.ip, endp.mac, endp.vni);
+    if (nh_id == SAI_NULL_OBJECT_ID)
+    {
+        throw std::runtime_error("NH Tunnel create failed for " + getName() + " ip " + endp.ip.to_string());
+    }
+
+    nh_map_.insert({endp.ip, nh_id});
+    return nh_id;
+}
+
+bool VNetVrfObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
+{
+    set<sai_object_id_t> vr_set;
+    vr_set.insert(getVRidIngress());
+    auto& peer_list = getPeerList();
+
+    auto l_fn = [&] (const string& vnet) {
+        auto *vnet_obj = dynamic_cast<VNetVrfObject*>(getVnetOrch()->getVnetPtr(vnet));
+        sai_object_id_t vr_id = vnet_obj->getVRidIngress();
+        vr_set.insert(vr_id);
+    };
+
+    for (auto peer : peer_list)
+    {
+        if (!getVnetOrch()->isVnetExists(peer))
+        {
+            SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str());
+            return false;
+        }
+        l_fn(peer);
+    }
+
+    sai_ip_prefix_t pfx;
+    copy(pfx, ipPrefix);
+    sai_object_id_t nh_id = getNextHop(endp);
+
+    for (auto vr_id : vr_set)
+    {
+        if(!add_route(vr_id, pfx, nh_id))
+        {
+            SWSS_LOG_ERROR("Route add failed for %s", ipPrefix.to_string().c_str());
+            break;
+        }
+    }
+    return true;
 }
 
 sai_object_id_t VNetVrfObject::getVRidIngress() const
@@ -80,7 +184,7 @@ bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
         if (status != SAI_STATUS_SUCCESS)
         {
             SWSS_LOG_ERROR("Failed to create virtual router name: %s, rv: %d",
-                           vnet_name_.c_str(), status);
+                           getName().c_str(), status);
             throw std::runtime_error("Failed to create VR object");
         }
         return true;
@@ -100,7 +204,7 @@ bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
         }
     }
 
-    SWSS_LOG_INFO("VNET '%s' router object created ", vnet_name_.c_str());
+    SWSS_LOG_INFO("VNET '%s' router object created ", getName().c_str());
     return true;
 }
 
@@ -116,13 +220,35 @@ bool VNetVrfObject::updateObj(vector<sai_attribute_t>& attrs)
             if (status != SAI_STATUS_SUCCESS)
             {
                 SWSS_LOG_ERROR("Failed to update virtual router attribute. VNET name: %s, rv: %d",
-                                vnet_name_.c_str(), status);
+                                getName().c_str(), status);
                 return false;
             }
         }
     }
 
-    SWSS_LOG_INFO("VNET '%s' was updated", vnet_name_.c_str());
+    SWSS_LOG_INFO("VNET '%s' was updated", getName().c_str());
+    return true;
+}
+
+bool VNetVrfObject::add_route(sai_object_id_t vr_id, sai_ip_prefix_t& ip_pfx, sai_object_id_t nh_id)
+{
+    sai_route_entry_t route_entry;
+    route_entry.vr_id = vr_id;
+    route_entry.switch_id = gSwitchId;
+    route_entry.destination = ip_pfx;
+
+    sai_attribute_t route_attr;
+
+    route_attr.id = SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID;
+    route_attr.value.oid = nh_id;
+
+    sai_status_t status = sai_route_api->create_route_entry(&route_entry, 1, &route_attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("SAI failed to create route");
+        return false;
+    }
+
     return true;
 }
 
@@ -135,11 +261,11 @@ VNetVrfObject::~VNetVrfObject()
         if (status != SAI_STATUS_SUCCESS)
         {
             SWSS_LOG_ERROR("Failed to remove virtual router name: %s, rv:%d",
-                            vnet_name_.c_str(), status);
+                            getName().c_str(), status);
         }
     }
 
-    SWSS_LOG_INFO("VNET '%s' deleted ", vnet_name_.c_str());
+    SWSS_LOG_INFO("VNET '%s' deleted ", getName().c_str());
 }
 
 /*
@@ -150,14 +276,13 @@ set<uint32_t> VNetBitmapObject::vnetOffsets_;
 set<uint32_t> VNetBitmapObject::tunnelOffsets_;
 map<string, uint32_t> VNetBitmapObject::vnetIds_;
 
-VNetBitmapObject::VNetBitmapObject(const std::string& vnet, string& tunnel, set<string>& peer,
-                             vector<sai_attribute_t>& attrs) : VNetObject(tunnel, peer)
+VNetBitmapObject::VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, const std::string& vnet, string& tunnel, set<string>& peer,
+                             vector<sai_attribute_t>& attrs) : VNetObject(vnetName, vnetOrch, tunnel, peer)
 {
     SWSS_LOG_ENTER();
 
-    vnet_name_ = vnet;
     peers_ = peer;
-    vnet_id_ = getFreeBitmapId(vnet_name_);
+    vnet_id_ = getFreeBitmapId(getName());
 }
 
 bool VNetBitmapObject::updateObj(vector<sai_attribute_t>& attrs)
@@ -404,17 +529,6 @@ bool VNetBitmapObject::addIntf(Port& port, IpPrefix *prefix)
  * VNet Orch class definitions
  */
 
-#if 0
-template <class T>
-std::unique_ptr<T> VNetOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
-                                          vector<sai_attribute_t>& attrs)
-{
-    std::unique_ptr<T> vnet_obj(new T(vnet_name, tunnel, plist, attrs));
-    return vnet_obj;
-}
-
-#endif
-
 VNetOrch::VNetOrch(DBConnector *db, const std::string& tableName)
          : Orch2(db, tableName, request_)
 {
@@ -550,7 +664,7 @@ VNetVrfOrch::VNetVrfOrch(DBConnector *db, const std::string& tableName)
 std::unique_ptr<VNetObject> VNetVrfOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
                                           vector<sai_attribute_t>& attrs)
 {
-    std::unique_ptr<VNetObject> vnet_obj(new VNetVrfObject(vnet_name, tunnel, plist, attrs));
+    std::unique_ptr<VNetObject> vnet_obj(new VNetVrfObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
     return vnet_obj;
 }
 
@@ -564,35 +678,13 @@ VNetBitmapOrch::VNetBitmapOrch(DBConnector *db, const std::string& tableName)
 std::unique_ptr<VNetObject> VNetBitmapOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
                                           vector<sai_attribute_t>& attrs)
 {
-    std::unique_ptr<VNetObject> vnet_obj(new VNetBitmapObject(vnet_name, tunnel, plist, attrs));
+    std::unique_ptr<VNetObject> vnet_obj(new VNetBitmapObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
     return vnet_obj;
 }
 
 /*
  * Vnet Route Handling
  */
-
-/* static bool add_route(sai_object_id_t vr_id, sai_ip_prefix_t& ip_pfx, sai_object_id_t nh_id) */
-/* { */
-/*     sai_route_entry_t route_entry; */
-/*     route_entry.vr_id = vr_id; */
-/*     route_entry.switch_id = gSwitchId; */
-/*     route_entry.destination = ip_pfx; */
-
-/*     sai_attribute_t route_attr; */
-
-/*     route_attr.id = SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID; */
-/*     route_attr.value.oid = nh_id; */
-
-/*     sai_status_t status = sai_route_api->create_route_entry(&route_entry, 1, &route_attr); */
-/*     if (status != SAI_STATUS_SUCCESS) */
-/*     { */
-/*         SWSS_LOG_ERROR("SAI failed to create route"); */
-/*         return false; */
-/*     } */
-
-/*     return true; */
-/* } */
 
 VNetRouteOrch::VNetRouteOrch(DBConnector *db, vector<string> &tableNames, VNetOrch *vnetOrch)
                                   : Orch2(db, tableNames, request_), vnet_orch_(vnetOrch)
@@ -601,32 +693,6 @@ VNetRouteOrch::VNetRouteOrch(DBConnector *db, vector<string> &tableNames, VNetOr
 
     handler_map_.insert(handler_pair(APP_VNET_RT_TABLE_NAME, &VNetRouteOrch::handleRoutes));
     handler_map_.insert(handler_pair(APP_VNET_RT_TUNNEL_TABLE_NAME, &VNetRouteOrch::handleTunnel));
-}
-
-sai_object_id_t VNetRouteOrch::getNextHop(const string& vnet, tunnelEndpoint& endp)
-{
-    auto it = nh_tunnels_.find(vnet);
-    if (it != nh_tunnels_.end())
-    {
-        if (it->second.find(endp.ip) != it->second.end())
-        {
-            return it->second.at(endp.ip);
-        }
-    }
-
-    sai_object_id_t nh_id = SAI_NULL_OBJECT_ID;
-    auto tun_name = vnet_orch_->getTunnelName(vnet);
-
-    VxlanTunnelOrch* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>();
-
-    nh_id = vxlan_orch->createNextHopTunnel(tun_name, endp.ip, endp.mac, endp.vni);
-    if (nh_id == SAI_NULL_OBJECT_ID)
-    {
-        throw std::runtime_error("NH Tunnel create failed for " + vnet + " ip " + endp.ip.to_string());
-    }
-
-    nh_tunnels_[vnet].insert({endp.ip, nh_id});
-    return nh_id;
 }
 
 bool VNetRouteOrch::doRouteTask(const string& vnet, IpPrefix& ipPrefix, tunnelEndpoint& endp)
@@ -691,48 +757,6 @@ bool VNetRouteOrch::doRouteTask(const string& vnet, IpPrefix& ipPrefix, string& 
     VNetObject *vnet_obj = vnet_orch_->getVnetPtr(vnet);
 
     return vnet_obj->addRoute(ipPrefix, ifname);
-
-    /* Port p; */
-    /* if (!gPortsOrch->getPort(ifname, p) || (p.m_rif_id == SAI_NULL_OBJECT_ID)) */
-    /* { */
-    /*     SWSS_LOG_WARN("Port/RIF %s doesn't exist", ifname.c_str()); */
-    /*     return false; */
-    /* } */
-
-    /* set<sai_object_id_t> vr_set; */
-    /* auto& peer_list = vnet_orch_->getPeerList(vnet); */
-    /* auto *vnet_obj = vnet_orch_->getTypePtr<VNetVrfObject>(vnet); */
-    /* vr_set.insert(vnet_obj->getVRidEgress()); */
-
-    /* auto l_fn = [&] (const string& vnet) { */
-    /*     auto *vnet_obj = vnet_orch_->getTypePtr<VNetVrfObject>(vnet); */
-    /*     sai_object_id_t vr_id = vnet_obj->getVRidIngress(); */
-    /*     vr_set.insert(vr_id); */
-    /* }; */
-
-    /* for (auto peer : peer_list) */
-    /* { */
-    /*     if (!vnet_orch_->isVnetExists(peer)) */
-    /*     { */
-    /*         SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str()); */
-    /*         return false; */
-    /*     } */
-    /*     l_fn(peer); */
-    /* } */
-
-    /* sai_ip_prefix_t pfx; */
-    /* copy(pfx, ipPrefix); */
-
-    /* for (auto vr_id : vr_set) */
-    /* { */
-    /*     if(!add_route(vr_id, pfx, p.m_rif_id )) */
-    /*     { */
-    /*         SWSS_LOG_ERROR("Route add failed for %s", ipPrefix.to_string().c_str()); */
-    /*         break; */
-    /*     } */
-    /* } */
-
-    /* return true; */
 }
 
 #if 0
