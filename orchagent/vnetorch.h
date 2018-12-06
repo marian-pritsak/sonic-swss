@@ -21,18 +21,18 @@ const request_description_t vnet_request_description = {
     { "vxlan_tunnel", "vni" } // mandatory attributes
 };
 
-enum class VNET_EXEC
-{
-    VNET_EXEC_VRF,
-    VNET_EXEC_BRIDGE,
-    VNET_EXEC_INVALID
-};
-
 enum class VR_TYPE
 {
     ING_VR_VALID,
     EGR_VR_VALID,
     VR_INVALID
+};
+
+struct tunnelEndpoint
+{
+    IpAddress ip;
+    MacAddress mac;
+    uint32_t vni;
 };
 
 typedef map<VR_TYPE, sai_object_id_t> vrid_list_t;
@@ -72,12 +72,17 @@ public:
         return tunnel_;
     }
 
-    virtual bool addVlan(uint16_t vlan_id)
+    virtual bool addIntf(Port& port, IpPrefix *prefix)
     {
         return false;
     }
 
-    virtual bool addIntf(Port& port, IpPrefix *prefix)
+    virtual bool addRoute(IpPrefix& ipPrefix, string& ifname)
+    {
+        return false;
+    }
+
+    virtual bool addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
     {
         return false;
     }
@@ -194,17 +199,17 @@ typedef std::unordered_map<std::string, VNetObject_T> VNetTable;
 class VNetOrch : public Orch2
 {
 public:
-    VNetOrch(DBConnector *db, const std::string&, VNET_EXEC op = VNET_EXEC::VNET_EXEC_VRF);
+    VNetOrch(DBConnector *db, const std::string&);
+    virtual ~VNetOrch() {}
 
     bool isVnetExists(const std::string& name) const
     {
         return vnet_table_.find(name) != std::end(vnet_table_);
     }
 
-    template <class T>
-    T* getTypePtr(const std::string& name) const
+    VNetObject * getVnetPtr(const string& name)
     {
-        return static_cast<T *>(vnet_table_.at(name).get());
+        return vnet_table_.at(name).get();
     }
 
     sai_object_id_t getEncapMapId(const std::string& name) const
@@ -232,30 +237,32 @@ public:
         return vnet_table_.at(name)->getTunnelName();
     }
 
-    bool isVnetExecVrf() const
-    {
-        return (vnet_exec_ == VNET_EXEC::VNET_EXEC_VRF);
-    }
-
-    bool isVnetExecBridge() const
-    {
-        return (vnet_exec_ == VNET_EXEC::VNET_EXEC_BRIDGE);
-    }
-
-    bool addVlan(const string& name, uint16_t vlan_id);
-    bool addIntf(Port& port, const string& name, IpPrefix *prefix);
+    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&) = 0;
 
 private:
     virtual bool addOperation(const Request& request);
     virtual bool delOperation(const Request& request);
 
-    template <class T>
-    std::unique_ptr<T> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&);
-
     VNetTable vnet_table_;
     VNetRequest request_;
-    VNET_EXEC vnet_exec_;
+};
 
+class VNetVrfOrch : public VNetOrch
+{
+public:
+    VNetVrfOrch(DBConnector *db, const std::string&);
+    virtual ~VNetVrfOrch() {}
+
+    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&);
+};
+
+class VNetBitmapOrch : public VNetOrch
+{
+public:
+    VNetBitmapOrch(DBConnector *db, const std::string&);
+    virtual ~VNetBitmapOrch() {}
+
+    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&);
 };
 
 const request_description_t vnet_route_description = {
@@ -278,13 +285,6 @@ public:
 typedef map<IpAddress, sai_object_id_t> NextHopMap;
 typedef map<string, NextHopMap> NextHopTunnels;
 
-struct tunnelEndpoint
-{
-    IpAddress ip;
-    MacAddress mac;
-    uint32_t vni;
-};
-
 class VNetRouteOrch : public Orch2
 {
 public:
@@ -300,10 +300,8 @@ private:
     void handleRoutes(const Request&);
     void handleTunnel(const Request&);
 
-    template<typename T>
     bool doRouteTask(const string& vnet, IpPrefix& ipPrefix, tunnelEndpoint& endp);
 
-    template<typename T>
     bool doRouteTask(const string& vnet, IpPrefix& ipPrefix, string& ifname);
 
     sai_object_id_t getNextHop(const string& vnet, tunnelEndpoint& endp);

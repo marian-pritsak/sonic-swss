@@ -80,13 +80,14 @@ bool OrchDaemon::init()
     VNetOrch *vnet_orch;
     if (platform == MLNX_PLATFORM_SUBSTRING)
     {
-        vnet_orch = new VNetOrch(m_applDb, APP_VNET_TABLE_NAME, VNET_EXEC::VNET_EXEC_BRIDGE);
+        vnet_orch = new VNetBitmapOrch(m_applDb, APP_VNET_TABLE_NAME);
     }
     else
     {
-        vnet_orch = new VNetOrch(m_applDb, APP_VNET_TABLE_NAME);
+        vnet_orch = new VNetVrfOrch(m_applDb, APP_VNET_TABLE_NAME);
     }
     gDirectory.set(vnet_orch);
+
     VNetRouteOrch *vnet_rt_orch = new VNetRouteOrch(m_applDb, vnet_tables, vnet_orch);
     gDirectory.set(vnet_rt_orch);
     VRFOrch *vrf_orch = new VRFOrch(m_applDb, APP_VRF_TABLE_NAME);

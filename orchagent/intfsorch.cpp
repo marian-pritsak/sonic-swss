@@ -265,7 +265,12 @@ void IntfsOrch::doTask(Consumer &consumer)
             if (!vnet_name.empty())
             {
                 VNetOrch* vnet_orch = gDirectory.get<VNetOrch*>();
-                if (!vnet_orch->addIntf(port, vnet_name, ip_prefix_in_key ? &ip_prefix : nullptr))
+                if (!vnet_orch->isVnetExists(vnet_name))
+                {
+                    it++;
+                    continue;
+                }
+                if (!vnet_orch->getVnetPtr(vnet_name)->addIntf(port, ip_prefix_in_key ? &ip_prefix : nullptr))
                 {
                     it++;
                     continue;
