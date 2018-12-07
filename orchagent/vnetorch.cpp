@@ -32,12 +32,12 @@ extern sai_object_id_t gVirtualRouterId;
  */
 std::vector<VR_TYPE> vr_cntxt;
 
-VNetVrfObject::VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const std::string& vnet, string& tunnel, set<string>& peer,
-                             vector<sai_attribute_t>& attrs) : VNetObject(vnetName, vnetOrch, tunnel, peer)
+VNetVrfObject::VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const VNetInfo& vnetInfo) :
+    VNetObject(vnetName, vnetOrch, vnetInfo)
 {
     SWSS_LOG_ENTER();
 
-    createObj(attrs);
+    createObj();
 }
 
 bool VNetVrfObject::addRoute(IpPrefix& ipPrefix, string& ifname)
@@ -185,9 +185,20 @@ set<sai_object_id_t> VNetVrfObject::getVRids() const
     return ids;
 }
 
-bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
+bool VNetVrfObject::createObj()
 {
     SWSS_LOG_ENTER();
+
+    sai_attribute_t attr;
+    vector<sai_attribute_t> attrs;
+    static const MacAddress emptyMac;
+
+    if (getSrcMac() != emptyMac)
+    {
+        attr.id = SAI_VIRTUAL_ROUTER_ATTR_SRC_MAC_ADDRESS;
+        getSrcMac().getMac(attr.value.mac);
+        attrs.push_back(attr);
+    }
 
     auto l_fn = [&] (sai_object_id_t& router_id) {
 
@@ -218,21 +229,44 @@ bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
         }
     }
 
+    VxlanTunnelOrch* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>();
+    if (!vxlan_orch->createVxlanTunnelMap(
+                getTunnelName(),
+                TUNNEL_MAP_T_VIRTUAL_ROUTER,
+                getVni(),
+                getVRidIngress(),
+                getVRidEgress()))
+    {
+        SWSS_LOG_ERROR("VNET '%s', tunnel '%s', map create failed",
+                        getName().c_str(), getTunnelName().c_str());
+    }
+
     SWSS_LOG_INFO("VNET '%s' router object created ", getName().c_str());
     return true;
 }
 
-bool VNetVrfObject::updateObj(vector<sai_attribute_t>& attrs)
+bool VNetVrfObject::updateObj(const VNetInfo& vnetInfo)
 {
     SWSS_LOG_ENTER();
 
+    sai_attribute_t attr;
+    vector<sai_attribute_t> attrs;
+    static const MacAddress emptyMac;
+
+    if (getSrcMac() != emptyMac)
+    {
+        attr.id = SAI_VIRTUAL_ROUTER_ATTR_SRC_MAC_ADDRESS;
+        getSrcMac().getMac(attr.value.mac);
+        attrs.push_back(attr);
+    }
+
     set<sai_object_id_t> vr_ent = getVRids();
 
-    for (const auto& attr: attrs)
+    for (const auto& a: attrs)
     {
         for (auto it : vr_ent)
         {
-            sai_status_t status = sai_virtual_router_api->set_virtual_router_attribute(it, &attr);
+            sai_status_t status = sai_virtual_router_api->set_virtual_router_attribute(it, &a);
             if (status != SAI_STATUS_SUCCESS)
             {
                 SWSS_LOG_ERROR("Failed to update virtual router attribute. VNET name: %s, rv: %d",
@@ -296,16 +330,15 @@ set<uint32_t> VNetBitmapObject::vnetOffsets_;
 set<uint32_t> VNetBitmapObject::tunnelOffsets_;
 map<string, uint32_t> VNetBitmapObject::vnetIds_;
 
-VNetBitmapObject::VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, const std::string& vnet, string& tunnel, set<string>& peer,
-                             vector<sai_attribute_t>& attrs) : VNetObject(vnetName, vnetOrch, tunnel, peer)
+VNetBitmapObject::VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, const VNetInfo& vnetInfo) :
+    VNetObject(vnetName, vnetOrch, vnetInfo)
 {
     SWSS_LOG_ENTER();
 
-    peers_ = peer;
     vnet_id_ = getFreeBitmapId(getName());
 }
 
-bool VNetBitmapObject::updateObj(vector<sai_attribute_t>& attrs)
+bool VNetBitmapObject::updateObj(const VNetInfo& vnetInfo)
 {
     SWSS_LOG_ENTER();
 
@@ -480,7 +513,7 @@ bool VNetBitmapObject::addIntf(Port& port, IpPrefix *prefix)
         return false;
     }
 
-    for (const auto& vnet : peers_)
+    for (const auto& vnet : getPeerList())
     {
         uint32_t id = getBitmapId(vnet);
         if (id == 0)
@@ -576,34 +609,28 @@ bool VNetOrch::addOperation(const Request& request)
     SWSS_LOG_ENTER();
     SWSS_LOG_ERROR("marianp: %s", __FUNCTION__);
 
-    sai_attribute_t attr;
-    vector<sai_attribute_t> attrs;
-    set<string> peer_list = {};
-    bool peer = false, create = false;
-    /* uint32_t vni=0; */
-    string tunnel;
+    VNetInfo vnetInfo;
+    bool peer = false, create = false, isMac = false;
 
     for (const auto& name: request.getAttrFieldNames())
     {
         if (name == "src_mac")
         {
-            const auto& mac = request.getAttrMacAddress("src_mac");
-            attr.id = SAI_VIRTUAL_ROUTER_ATTR_SRC_MAC_ADDRESS;
-            memcpy(attr.value.mac, mac.getMac(), sizeof(sai_mac_t));
-            attrs.push_back(attr);
+            vnetInfo.mac = request.getAttrMacAddress("src_mac");
+            isMac = true;
         }
         else if (name == "peer_list")
         {
-            peer_list  = request.getAttrSet("peer_list");
+            vnetInfo.peers  = request.getAttrSet("peer_list");
             peer = true;
         }
         else if (name == "vni")
         {
-            /* vni  = static_cast<sai_uint32_t>(request.getAttrUint("vni")); */
+            vnetInfo.vni  = static_cast<sai_uint32_t>(request.getAttrUint("vni"));
         }
         else if (name == "vxlan_tunnel")
         {
-            tunnel = request.getAttrString("vxlan_tunnel");
+            vnetInfo.tunnel = request.getAttrString("vxlan_tunnel");
         }
         else
         {
@@ -621,15 +648,15 @@ bool VNetOrch::addOperation(const Request& request)
         auto it = vnet_table_.find(vnet_name);
         VxlanTunnelOrch* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>();
 
-        if (!vxlan_orch->isTunnelExists(tunnel))
+        if (!vxlan_orch->isTunnelExists(vnetInfo.tunnel))
         {
-            SWSS_LOG_WARN("Vxlan tunnel '%s' doesn't exist", tunnel.c_str());
+            SWSS_LOG_WARN("Vxlan tunnel '%s' doesn't exist", vnetInfo.tunnel.c_str());
             return false;
         }
 
         if (it == std::end(vnet_table_))
         {
-            obj = createObject(vnet_name, tunnel, peer_list, attrs);
+            obj = createObject(vnet_name, vnetInfo);
             create = true;
             SWSS_LOG_INFO("VNET '%s' was added ", vnet_name.c_str());
         }
@@ -648,11 +675,11 @@ bool VNetOrch::addOperation(const Request& request)
         }
         else if (peer)
         {
-            it->second->setPeerList(peer_list);
+            it->second->setPeerList(vnetInfo.peers);
         }
-        else if (!attrs.empty())
+        else if (isMac)
         {
-            if(!it->second->updateObj(attrs))
+            if(!it->second->updateObj(vnetInfo))
             {
                 return true;
             }
@@ -696,12 +723,11 @@ VNetVrfOrch::VNetVrfOrch(DBConnector *db, const std::string& tableName)
     vr_cntxt = { VR_TYPE::ING_VR_VALID, VR_TYPE::EGR_VR_VALID };
 }
 
-std::unique_ptr<VNetObject> VNetVrfOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
-                                          vector<sai_attribute_t>& attrs)
+std::unique_ptr<VNetObject> VNetVrfOrch::createObject(const string& vnet_name, const VNetInfo& vnetInfo)
 {
     SWSS_LOG_ENTER();
 
-    std::unique_ptr<VNetObject> vnet_obj(new VNetVrfObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
+    std::unique_ptr<VNetObject> vnet_obj(new VNetVrfObject(vnet_name, this, vnetInfo));
     return vnet_obj;
 }
 
@@ -712,12 +738,11 @@ VNetBitmapOrch::VNetBitmapOrch(DBConnector *db, const std::string& tableName)
     SWSS_LOG_ERROR("marianp: %s", __PRETTY_FUNCTION__);
 }
 
-std::unique_ptr<VNetObject> VNetBitmapOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
-                                          vector<sai_attribute_t>& attrs)
+std::unique_ptr<VNetObject> VNetBitmapOrch::createObject(const string& vnet_name, const VNetInfo& vnetInfo)
 {
     SWSS_LOG_ENTER();
 
-    std::unique_ptr<VNetObject> vnet_obj(new VNetBitmapObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
+    std::unique_ptr<VNetObject> vnet_obj(new VNetBitmapObject(vnet_name, this, vnetInfo));
     return vnet_obj;
 }
 

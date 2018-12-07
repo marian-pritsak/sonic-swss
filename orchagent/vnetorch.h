@@ -35,6 +35,14 @@ struct tunnelEndpoint
     uint32_t vni;
 };
 
+struct VNetInfo
+{
+    string tunnel;
+    uint32_t vni;
+    MacAddress mac;
+    set<string> peers;
+};
+
 typedef map<VR_TYPE, sai_object_id_t> vrid_list_t;
 typedef map<IpAddress, sai_object_id_t> NextHopMap;
 extern std::vector<VR_TYPE> vr_cntxt;
@@ -50,9 +58,16 @@ class VNetOrch;
 class VNetObject
 {
 public:
-    VNetObject(const string& vnetName, VNetOrch *vnetOrch, string& tunName, set<string>& peer) : vnet_name_(vnetName), vnet_orch_(vnetOrch), tunnel_(tunName), peer_list_(peer) { }
+    VNetObject(const string& vnetName, VNetOrch *vnetOrch, const VNetInfo& vnetInfo) :
+        vnet_name_(vnetName),
+        vnet_orch_(vnetOrch),
+        tunnel_(vnetInfo.tunnel),
+        vni_(vnetInfo.vni),
+        peer_list_(vnetInfo.peers),
+        mac_(vnetInfo.mac)
+    { }
 
-    virtual bool updateObj(vector<sai_attribute_t>&) = 0;
+    virtual bool updateObj(const VNetInfo& vnetInfo) = 0;
 
     virtual bool addIntf(Port& port, IpPrefix *prefix)
     {
@@ -89,6 +104,16 @@ public:
         return vnet_name_;
     }
 
+    uint32_t getVni() const
+    {
+        return vni_;
+    }
+
+    const MacAddress& getSrcMac() const
+    {
+        return mac_;
+    }
+
     VNetOrch *getVnetOrch() const
     {
         return vnet_orch_;
@@ -101,20 +126,22 @@ private:
     VNetOrch *vnet_orch_;
     set<string> peer_list_ = {};
     string tunnel_;
+    uint32_t vni_;
+    MacAddress mac_;
 };
 
 class VNetVrfObject : public VNetObject
 {
 public:
-    VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const string& vnet, string& tunnel, set<string>& peer, vector<sai_attribute_t>& attrs);
+    VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const VNetInfo& vnetInfo);
 
     virtual bool addRoute(IpPrefix& ipPrefix, string& ifname);
 
     virtual bool addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp);
 
-    bool createObj(vector<sai_attribute_t>&);
+    bool createObj();
 
-    bool updateObj(vector<sai_attribute_t>&);
+    virtual bool updateObj(const VNetInfo& vnetInfo);
 
     ~VNetVrfObject();
 
@@ -136,30 +163,39 @@ private:
 class VNetBitmapObject: public VNetObject
 {
 public:
-    VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, const string& vnet, string& tunnel, set<string>& peer, vector<sai_attribute_t>& attrs);
+    VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, const VNetInfo& vnetInfo);
 
     virtual bool addIntf(Port& port, IpPrefix *prefix);
 
-    virtual bool updateObj(vector<sai_attribute_t>&);
+    virtual bool updateObj(const VNetInfo& vnetInfo);
 
     virtual ~VNetBitmapObject() {}
 
 private:
     static uint32_t getFreeBitmapId(const string& name);
+
     static uint32_t getBitmapId(const string& name);
+
     static void recycleBitmapId(uint32_t id);
+
     static uint32_t getFreeVnetTableOffset();
+
     static void recycleVnetTableOffset(uint32_t offset);
+
     static uint32_t getFreeTunnelRouteTableOffset();
+
     static void recycleTunnelRouteTableOffset(uint32_t offset);
+
     static uint32_t vnetBitmap_;
+
     static map<string, uint32_t> vnetIds_;
+
     static set<uint32_t> vnetOffsets_;
+
     static set<uint32_t> tunnelOffsets_;
 
     bool addVlan(uint16_t vlan_id);
 
-    set<string> peers_;
     uint32_t vnet_id_;
 };
 
@@ -192,7 +228,7 @@ public:
         return vnet_table_.at(name)->getTunnelName();
     }
 
-    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&) = 0;
+    virtual std::unique_ptr<VNetObject> createObject(const string& vnet_name, const VNetInfo& vnetInfo) = 0;
 
 private:
     virtual bool addOperation(const Request& request);
@@ -208,7 +244,7 @@ public:
     VNetVrfOrch(DBConnector *db, const std::string&);
     virtual ~VNetVrfOrch() {}
 
-    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&);
+    virtual std::unique_ptr<VNetObject> createObject(const string& vnet_name, const VNetInfo& vnetInfo);
 };
 
 class VNetBitmapOrch : public VNetOrch
@@ -217,7 +253,7 @@ public:
     VNetBitmapOrch(DBConnector *db, const std::string&);
     virtual ~VNetBitmapOrch() {}
 
-    virtual std::unique_ptr<VNetObject> createObject(const string&, string&, set<string>&, vector<sai_attribute_t>&);
+    virtual std::unique_ptr<VNetObject> createObject(const string& vnet_name, const VNetInfo& vnetInfo);
 };
 
 const request_description_t vnet_route_description = {
