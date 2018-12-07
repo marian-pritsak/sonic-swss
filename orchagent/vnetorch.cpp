@@ -35,6 +35,8 @@ std::vector<VR_TYPE> vr_cntxt;
 VNetVrfObject::VNetVrfObject(const string& vnetName, VNetOrch *vnetOrch, const std::string& vnet, string& tunnel, set<string>& peer,
                              vector<sai_attribute_t>& attrs) : VNetObject(vnetName, vnetOrch, tunnel, peer)
 {
+    SWSS_LOG_ENTER();
+
     createObj(attrs);
 }
 
@@ -86,6 +88,8 @@ bool VNetVrfObject::addRoute(IpPrefix& ipPrefix, string& ifname)
 
 sai_object_id_t VNetVrfObject::getNextHop(tunnelEndpoint& endp)
 {
+    SWSS_LOG_ENTER();
+
     if (nh_map_.find(endp.ip) != nh_map_.end())
     {
         return nh_map_.at(endp.ip);
@@ -108,6 +112,8 @@ sai_object_id_t VNetVrfObject::getNextHop(tunnelEndpoint& endp)
 
 bool VNetVrfObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
 {
+    SWSS_LOG_ENTER();
+
     set<sai_object_id_t> vr_set;
     vr_set.insert(getVRidIngress());
     auto& peer_list = getPeerList();
@@ -145,6 +151,8 @@ bool VNetVrfObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
 
 sai_object_id_t VNetVrfObject::getVRidIngress() const
 {
+    SWSS_LOG_ENTER();
+
     if (vr_ids_.find(VR_TYPE::ING_VR_VALID) != vr_ids_.end())
     {
         return vr_ids_.at(VR_TYPE::ING_VR_VALID);
@@ -154,6 +162,8 @@ sai_object_id_t VNetVrfObject::getVRidIngress() const
 
 sai_object_id_t VNetVrfObject::getVRidEgress() const
 {
+    SWSS_LOG_ENTER();
+
     if (vr_ids_.find(VR_TYPE::EGR_VR_VALID) != vr_ids_.end())
     {
         return vr_ids_.at(VR_TYPE::EGR_VR_VALID);
@@ -163,6 +173,8 @@ sai_object_id_t VNetVrfObject::getVRidEgress() const
 
 set<sai_object_id_t> VNetVrfObject::getVRids() const
 {
+    SWSS_LOG_ENTER();
+
     set<sai_object_id_t> ids;
 
     for_each (vr_ids_.begin(), vr_ids_.end(), [&](std::pair<VR_TYPE, sai_object_id_t> element)
@@ -175,6 +187,8 @@ set<sai_object_id_t> VNetVrfObject::getVRids() const
 
 bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
 {
+    SWSS_LOG_ENTER();
+
     auto l_fn = [&] (sai_object_id_t& router_id) {
 
         sai_status_t status = sai_virtual_router_api->create_virtual_router(&router_id,
@@ -210,6 +224,8 @@ bool VNetVrfObject::createObj(vector<sai_attribute_t>& attrs)
 
 bool VNetVrfObject::updateObj(vector<sai_attribute_t>& attrs)
 {
+    SWSS_LOG_ENTER();
+
     set<sai_object_id_t> vr_ent = getVRids();
 
     for (const auto& attr: attrs)
@@ -232,6 +248,8 @@ bool VNetVrfObject::updateObj(vector<sai_attribute_t>& attrs)
 
 bool VNetVrfObject::add_route(sai_object_id_t vr_id, sai_ip_prefix_t& ip_pfx, sai_object_id_t nh_id)
 {
+    SWSS_LOG_ENTER();
+
     sai_route_entry_t route_entry;
     route_entry.vr_id = vr_id;
     route_entry.switch_id = gSwitchId;
@@ -254,6 +272,8 @@ bool VNetVrfObject::add_route(sai_object_id_t vr_id, sai_ip_prefix_t& ip_pfx, sa
 
 VNetVrfObject::~VNetVrfObject()
 {
+    SWSS_LOG_ENTER();
+
     set<sai_object_id_t> vr_ent = getVRids();
     for (auto it : vr_ent)
     {
@@ -294,6 +314,8 @@ bool VNetBitmapObject::updateObj(vector<sai_attribute_t>& attrs)
 
 uint32_t VNetBitmapObject::getFreeBitmapId(const string& vnet)
 {
+    SWSS_LOG_ENTER();
+
     for (uint32_t i = 0; i < VNET_BITMAP_SIZE; i++)
     {
         uint32_t id = 1 << i;
@@ -310,6 +332,8 @@ uint32_t VNetBitmapObject::getFreeBitmapId(const string& vnet)
 
 uint32_t VNetBitmapObject::getBitmapId(const string& vnet)
 {
+    SWSS_LOG_ENTER();
+
     if (vnetIds_.find(vnet) == vnetIds_.end())
     {
         return 0;
@@ -320,11 +344,15 @@ uint32_t VNetBitmapObject::getBitmapId(const string& vnet)
 
 void VNetBitmapObject::recycleBitmapId(uint32_t id)
 {
+    SWSS_LOG_ENTER();
+
     vnetBitmap_ &= ~id;
 }
 
 uint32_t VNetBitmapObject::getFreeVnetTableOffset()
 {
+    SWSS_LOG_ENTER();
+
     for (uint32_t i = 0; i < 256; i++)
     {
         if (vnetOffsets_.count(i) == 0)
@@ -339,11 +367,15 @@ uint32_t VNetBitmapObject::getFreeVnetTableOffset()
 
 void VNetBitmapObject::recycleVnetTableOffset(uint32_t offset)
 {
+    SWSS_LOG_ENTER();
+
     vnetOffsets_.erase(offset);
 }
 
 uint32_t VNetBitmapObject::getFreeTunnelRouteTableOffset()
 {
+    SWSS_LOG_ENTER();
+
     for (uint32_t i = 0; i < 256; i++)
     {
         if (tunnelOffsets_.count(i) == 0)
@@ -358,12 +390,15 @@ uint32_t VNetBitmapObject::getFreeTunnelRouteTableOffset()
 
 void VNetBitmapObject::recycleTunnelRouteTableOffset(uint32_t offset)
 {
+    SWSS_LOG_ENTER();
+
     tunnelOffsets_.erase(offset);
 }
 
 bool VNetBitmapObject::addVlan(uint16_t vlan_id)
 {
     SWSS_LOG_ENTER();
+
     SWSS_LOG_ERROR("marianp: %s", __PRETTY_FUNCTION__);
     Port p;
     if (!gPortsOrch->getPort("Ethernet0", p))
@@ -664,6 +699,8 @@ VNetVrfOrch::VNetVrfOrch(DBConnector *db, const std::string& tableName)
 std::unique_ptr<VNetObject> VNetVrfOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
                                           vector<sai_attribute_t>& attrs)
 {
+    SWSS_LOG_ENTER();
+
     std::unique_ptr<VNetObject> vnet_obj(new VNetVrfObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
     return vnet_obj;
 }
@@ -678,6 +715,8 @@ VNetBitmapOrch::VNetBitmapOrch(DBConnector *db, const std::string& tableName)
 std::unique_ptr<VNetObject> VNetBitmapOrch::createObject(const string& vnet_name, string& tunnel, set<string>& plist,
                                           vector<sai_attribute_t>& attrs)
 {
+    SWSS_LOG_ENTER();
+
     std::unique_ptr<VNetObject> vnet_obj(new VNetBitmapObject(vnet_name, this, vnet_name, tunnel, plist, attrs));
     return vnet_obj;
 }
