@@ -593,6 +593,70 @@ bool VNetBitmapObject::addIntf(Port& port, IpPrefix *prefix)
     return true;
 }
 
+bool VNetBitmapObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
+{
+    SWSS_LOG_ENTER();
+
+    sai_status_t status;
+    sai_attribute_t attr;
+    vector<sai_attribute_t> attrs;
+    sai_object_id_t tunnelRouteTableEntryId;
+    auto& peer_list = getPeerList();
+    uint32_t peerBitmap = vnet_id_;
+
+    for (auto peer : peer_list)
+    {
+        if (!getVnetOrch()->isVnetExists(peer))
+        {
+            SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str());
+            return false;
+        }
+        peerBitmap |= getBitmapId(peer);
+    }
+
+    sai_ip_prefix_t pfx;
+    copy(pfx, ipPrefix);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_ACTION;
+    attr.value.s32 = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ACTION_TO_TUNNEL;
+    attrs.push_back(attr);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_PRIORITY;
+    attr.value.u32 = getFreeTunnelRouteTableOffset();
+    attrs.push_back(attr);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_METADATA_KEY;
+    attr.value.u32 = 0;
+    attrs.push_back(attr);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_METADATA_MASK;
+    attr.value.u32 = ~peerBitmap;
+    attrs.push_back(attr);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_DST_IP_KEY;
+    attr.value.ipprefix = pfx;
+    attrs.push_back(attr);
+
+    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_NEXT_HOP;
+    attr.value.oid = SAI_NULL_OBJECT_ID;
+    attrs.push_back(attr);
+
+    SWSS_LOG_ERROR("marianp: %s %p %p", __PRETTY_FUNCTION__, sai_bmtor_api, sai_bmtor_api->create_table_tunnel_route_entry);
+    status = sai_bmtor_api->create_table_tunnel_route_entry(
+            &tunnelRouteTableEntryId,
+            gSwitchId,
+            (uint32_t)attrs.size(),
+            attrs.data());
+    SWSS_LOG_ERROR("marianp: %s after", __PRETTY_FUNCTION__);
+
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create local VNET route entry, SAI rc: %d", status);
+        return false;
+    }
+
+    return true;
+}
 /*
  * VNet Orch class definitions
  */
@@ -660,14 +724,6 @@ bool VNetOrch::addOperation(const Request& request)
             create = true;
             SWSS_LOG_INFO("VNET '%s' was added ", vnet_name.c_str());
         }
-
-        /* if (!vxlan_orch->createVxlanTunnelMap(tunnel, TUNNEL_MAP_T_VIRTUAL_ROUTER, vni, */
-        /*                                       obj->getEncapMapId(), obj->getDecapMapId())) */
-        /* { */
-        /*     SWSS_LOG_ERROR("VNET '%s', tunnel '%s', map create failed", */
-        /*                     vnet_name.c_str(), tunnel.c_str()); */
-        /* } */
-
 
         if (create)
         {
@@ -788,85 +844,6 @@ bool VNetRouteOrch::doRouteTask(const string& vnet, IpPrefix& ipPrefix, string& 
 
     return vnet_obj->addRoute(ipPrefix, ifname);
 }
-
-#if 0
-
-template<>
-bool VNetRouteOrch::doRouteTask<VNetBitmapObject>(const string& vnet, IpPrefix& ipPrefix, tunnelEndpoint& endp)
-{
-    SWSS_LOG_ENTER();
-
-    sai_attribute_t attr;
-    vector<sai_attribute_t> attrs;
-    sai_status_t status;
-    sai_object_id_t tunnelRouteTableEntryId;
-
-    if (!vnet_orch_->isVnetExists(vnet))
-    {
-        SWSS_LOG_WARN("VNET %s doesn't exist", vnet.c_str());
-        return false;
-    }
-
-    auto& peer_list = vnet_orch_->getPeerList(vnet);
-    auto *vnet_obj = vnet_orch_->getTypePtr<VNetVrfObject>(vnet);
-    uint32_t peerBitmap = vnet_orch_->getVnetId();
-
-    for (auto peer : peer_list)
-    {
-        if (!vnet_orch_->isVnetExists(peer))
-        {
-            SWSS_LOG_INFO("Peer VNET %s not yet created", peer.c_str());
-            return false;
-        }
-        auto *vnet_peer = vnet_orch_->getTypePtr<VNetVrfObject>(vnet);
-        peerBitmap |= vnet_orch_->getVnetId();
-    }
-
-    sai_ip_prefix_t pfx;
-    copy(pfx, ipPrefix);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_ACTION;
-    attr.value.s32 = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ACTION_TO_TUNNEL;
-    attrs.push_back(attr);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_PRIORITY;
-    attr.value.u32 = getFreeTunnelRouteTableOffset();
-    attrs.push_back(attr);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_METADATA_KEY;
-    attr.value.u32 = 0;
-    attrs.push_back(attr);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_METADATA_MASK;
-    attr.value.u32 = ~peerBitmap;
-    attrs.push_back(attr);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_DST_IP_KEY;
-    attr.value.ipprefix = saiPrefix;
-    attrs.push_back(attr);
-
-    attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_NEXT_HOP;
-    attr.value.oid = SAI_NULL_OBJECT_ID;
-    attrs.push_back(attr);
-
-    SWSS_LOG_ERROR("marianp: %s %p %p", __PRETTY_FUNCTION__, sai_bmtor_api, sai_bmtor_api->create_table_tunnel_route_entry);
-    status = sai_bmtor_api->create_table_tunnel_route_entry(
-            &tunnelRouteTableEntryId,
-            gSwitchId,
-            (uint32_t)attrs.size(),
-            attrs.data());
-    SWSS_LOG_ERROR("marianp: %s after", __PRETTY_FUNCTION__);
-
-    if (status != SAI_STATUS_SUCCESS)
-    {
-        SWSS_LOG_ERROR("Failed to create local VNET route entry, SAI rc: %d", status);
-        return false;
-    }
-
-    return true;
-}
-
-#endif
 
 void VNetRouteOrch::handleRoutes(const Request& request)
 {

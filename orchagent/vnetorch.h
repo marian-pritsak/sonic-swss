@@ -169,6 +169,8 @@ public:
 
     virtual bool updateObj(const VNetInfo& vnetInfo);
 
+    virtual bool addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp);
+
     virtual ~VNetBitmapObject() {}
 
 private:
