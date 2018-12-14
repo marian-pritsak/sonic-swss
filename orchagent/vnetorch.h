@@ -190,15 +190,17 @@ private:
 
     static uint32_t vnetBitmap_;
 
-    static map<string, uint32_t> vnetIds_;
-
-    static set<uint32_t> vnetOffsets_;
-
-    static set<uint32_t> tunnelOffsets_;
-
     bool addVlan(uint16_t vlan_id);
 
+    static map<string, uint32_t> vnetIds_;
+    static set<uint32_t> vnetOffsets_;
+    static set<uint32_t> tunnelOffsets_;
+
     uint32_t vnet_id_;
+    sai_object_id_t bridge_id_;
+    sai_object_id_t bridge_port_rif_id_;
+    sai_object_id_t bridge_port_tunnel_id_;
+    sai_object_id_t rif_id_;
 };
 
 typedef std::unique_ptr<VNetObject> VNetObject_T;

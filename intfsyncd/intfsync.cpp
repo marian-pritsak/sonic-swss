@@ -46,6 +46,19 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
         return;
 
     key = LinkCache::getInstance().ifindexToName(rtnl_addr_get_ifindex(addr));
+    std::vector<FieldValueTuple> fvVector;
+    if (key == "Vlan2")
+    {
+        fvVector.emplace_back("vnet_name", "Vnet2");
+    }
+    if (key == "Vlan3")
+    {
+        fvVector.emplace_back("vnet_name", "Vnet3");
+    }
+    if (key == "Vlan4")
+    {
+        fvVector.emplace_back("vnet_name", "Vnet2");
+    }
     key+= ":";
     nl_addr2str(rtnl_addr_get_local(addr), addrStr, MAX_ADDR_SIZE);
     key+= addrStr;
@@ -55,7 +68,6 @@ void IntfSync::onMsg(int nlmsg_type, struct nl_object *obj)
         return;
     }
 
-    std::vector<FieldValueTuple> fvVector;
     FieldValueTuple f("family", family);
     FieldValueTuple s("scope", scope);
     fvVector.push_back(s);
