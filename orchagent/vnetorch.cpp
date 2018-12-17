@@ -20,9 +20,12 @@
 
 extern sai_virtual_router_api_t* sai_virtual_router_api;
 extern sai_route_api_t* sai_route_api;
+extern sai_neighbor_api_t* sai_neighbor_api;
+extern sai_next_hop_api_t* sai_next_hop_api;
 extern sai_bmtor_api_t* sai_bmtor_api;
 extern sai_bridge_api_t* sai_bridge_api;
 extern sai_router_interface_api_t* sai_router_intfs_api;
+extern sai_fdb_api_t* sai_fdb_api;
 extern sai_object_id_t gSwitchId;
 extern Directory<Orch*> gDirectory;
 extern PortsOrch *gPortsOrch;
@@ -411,40 +414,46 @@ VNetBitmapObject::VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, c
         throw std::runtime_error("VNET creation failed");
     }
 
-    /* vector<sai_attribute_t> bpt_attrs; */
-    /* auto* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>(); */
-    /* auto *tunnel = vxlan_orch->getVxlanTunnel(getTunnelName()); */
+    vector<sai_attribute_t> bpt_attrs;
+    auto* vxlan_orch = gDirectory.get<VxlanTunnelOrch*>();
+    auto *tunnel = vxlan_orch->getVxlanTunnel(getTunnelName());
+    if (!tunnel->isActive())
+    {
+        tunnel->createTunnel(MAP_T::BRIDGE_TO_VNI, MAP_T::VNI_TO_BRIDGE);
+    }
 
-    /* attr.id = SAI_BRIDGE_PORT_ATTR_TYPE; */
-    /* attr.value.s32 = SAI_BRIDGE_PORT_TYPE_TUNNEL; */
-    /* bpt_attrs.push_back(attr); */
+    attr.id = SAI_BRIDGE_PORT_ATTR_TYPE;
+    attr.value.s32 = SAI_BRIDGE_PORT_TYPE_TUNNEL;
+    bpt_attrs.push_back(attr);
 
-    /* attr.id = SAI_BRIDGE_PORT_ATTR_BRIDGE_ID; */
-    /* attr.value.oid = bridge_id_; */
-    /* bpt_attrs.push_back(attr); */
+    attr.id = SAI_BRIDGE_PORT_ATTR_BRIDGE_ID;
+    attr.value.oid = bridge_id_;
+    bpt_attrs.push_back(attr);
 
-    /* attr.id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE; */
-    /* attr.value.booldata = true; */
-    /* bpt_attrs.push_back(attr); */
+    attr.id = SAI_BRIDGE_PORT_ATTR_ADMIN_STATE;
+    attr.value.booldata = true;
+    bpt_attrs.push_back(attr);
 
-    /* attr.id = SAI_BRIDGE_PORT_ATTR_TUNNEL_ID; */
-    /* attr.value.oid = tunnel->getTunnelId(); */
-    /* bpt_attrs.push_back(attr); */
+    attr.id = SAI_BRIDGE_PORT_ATTR_TUNNEL_ID;
+    attr.value.oid = tunnel->getTunnelId();
+    bpt_attrs.push_back(attr);
 
-    /* attr.id = SAI_BRIDGE_PORT_ATTR_FDB_LEARNING_MODE; */
-    /* attr.value.s32 = SAI_BRIDGE_PORT_FDB_LEARNING_MODE_DISABLE; */
-    /* bpt_attrs.push_back(attr); */
+    attr.id = SAI_BRIDGE_PORT_ATTR_FDB_LEARNING_MODE;
+    attr.value.s32 = SAI_BRIDGE_PORT_FDB_LEARNING_MODE_DISABLE;
+    bpt_attrs.push_back(attr);
 
-    /* status = sai_bridge_api->create_bridge_port( */
-    /*         &bridge_port_tunnel_id_, */
-    /*         gSwitchId, */
-    /*         (uint32_t)bpt_attrs.size(), */
-    /*         bpt_attrs.data()); */
-    /* if (status != SAI_STATUS_SUCCESS) */
-    /* { */
-    /*     SWSS_LOG_ERROR("Failed to create tunnel bridge port for VNET %s", getName().c_str()); */
-    /*     throw std::runtime_error("VNET creation failed"); */
-    /* } */
+    status = sai_bridge_api->create_bridge_port(
+            &bridge_port_tunnel_id_,
+            gSwitchId,
+            (uint32_t)bpt_attrs.size(),
+            bpt_attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create tunnel bridge port for VNET %s", getName().c_str());
+        throw std::runtime_error("VNET creation failed");
+    }
+
+    tunnel->addEncapMapperEntry(bridge_id_, getVni());
 
     //XXX MLNX SAI fails
     /* if (!vxlan_orch->createVxlanTunnelMap( */
@@ -459,7 +468,7 @@ VNetBitmapObject::VNetBitmapObject(const string& vnetName, VNetOrch *vnetOrch, c
     /*     throw std::runtime_error("VNET creation failed"); */
     /* } */
 
-    /* SWSS_LOG_NOTICE("Created BP"); */
+    SWSS_LOG_NOTICE("Created BP");
 
     vnet_id_ = getFreeBitmapId(getName());
 }
@@ -739,6 +748,87 @@ bool VNetBitmapObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
         peerBitmap |= getBitmapId(peer);
     }
 
+    /* FDB entry to the tunnel */
+    vector<sai_attribute_t> fdb_attrs;
+    sai_ip_address_t underlayAddr;
+    copy(underlayAddr, endp.ip);
+    sai_fdb_entry_t fdbEntry;
+    fdbEntry.switch_id = gSwitchId;
+    endp.mac.getMac(fdbEntry.mac_address);
+    fdbEntry.bv_id = bridge_id_;
+
+    attr.id = SAI_FDB_ENTRY_ATTR_TYPE;
+    attr.value.s32 = SAI_FDB_ENTRY_TYPE_STATIC;
+    fdb_attrs.push_back(attr);
+
+    attr.id = SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID;
+    attr.value.oid = bridge_port_tunnel_id_;
+    fdb_attrs.push_back(attr);
+
+    attr.id = SAI_FDB_ENTRY_ATTR_ENDPOINT_IP;
+    attr.value.ipaddr = underlayAddr;
+    fdb_attrs.push_back(attr);
+
+    status = sai_fdb_api->create_fdb_entry(
+            &fdbEntry,
+            (uint32_t)fdb_attrs.size(),
+            fdb_attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create fdb entry for tunnel, SAI rc: %d", status);
+        return false;
+    }
+
+    /* Fake neighbor */
+    vector<sai_attribute_t> n_attrs;
+    sai_neighbor_entry_t neigh;
+    neigh.switch_id = gSwitchId;
+    neigh.rif_id = rif_id_;
+    neigh.ip_address.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
+    neigh.ip_address.addr.ip4 = 0x64646464;
+
+    attr.id = SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS;
+    endp.mac.getMac(attr.value.mac);
+    n_attrs.push_back(attr);
+
+    status = sai_neighbor_api->create_neighbor_entry(
+            &neigh,
+            (uint32_t)n_attrs.size(),
+            n_attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create neighbor entry for tunnel, SAI rc: %d", status);
+        return false;
+    }
+
+    /* Nexthop */
+    vector<sai_attribute_t> nh_attrs;
+    sai_object_id_t nexthopId;
+
+    attr.id = SAI_NEXT_HOP_ATTR_TYPE;
+    attr.value.s32 = SAI_NEXT_HOP_TYPE_IP;
+    nh_attrs.push_back(attr);
+
+    attr.id = SAI_NEXT_HOP_ATTR_IP;
+    attr.value.ipaddr = neigh.ip_address;
+    nh_attrs.push_back(attr);
+
+    attr.id = SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID;
+    attr.value.oid = rif_id_;
+    nh_attrs.push_back(attr);
+
+    status = sai_next_hop_api->create_next_hop(
+            &nexthopId,
+            gSwitchId,
+            (uint32_t)nh_attrs.size(),
+            nh_attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create nexthop for tunnel, SAI rc: %d", status);
+        return false;
+    }
+
+    /* Tunnel route */
     vector<sai_attribute_t> tr_attrs;
     sai_ip_prefix_t pfx;
     copy(pfx, ipPrefix);
@@ -764,7 +854,7 @@ bool VNetBitmapObject::addTunnelRoute(IpPrefix& ipPrefix, tunnelEndpoint& endp)
     tr_attrs.push_back(attr);
 
     attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_NEXT_HOP;
-    attr.value.oid = SAI_NULL_OBJECT_ID;
+    attr.value.oid = nexthopId;
     tr_attrs.push_back(attr);
 
     SWSS_LOG_ERROR("marianp: %s %p %p", __PRETTY_FUNCTION__, sai_bmtor_api, sai_bmtor_api->create_table_tunnel_route_entry);
