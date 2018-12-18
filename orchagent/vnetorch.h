@@ -160,6 +160,14 @@ private:
     NextHopMap nh_map_;
 };
 
+struct VnetBridgeInfo
+{
+    sai_object_id_t bridge_id;
+    sai_object_id_t bridge_port_rif_id;
+    sai_object_id_t bridge_port_tunnel_id;
+    sai_object_id_t rif_id;
+};
+
 class VNetBitmapObject: public VNetObject
 {
 public:
@@ -188,19 +196,17 @@ private:
 
     static void recycleTunnelRouteTableOffset(uint32_t offset);
 
-    static uint32_t vnetBitmap_;
+    static VnetBridgeInfo getBridgeInfoByVni(uint32_t vni, string tunnelName);
 
     bool addVlan(uint16_t vlan_id);
 
+    static uint32_t vnetBitmap_;
     static map<string, uint32_t> vnetIds_;
     static set<uint32_t> vnetOffsets_;
     static set<uint32_t> tunnelOffsets_;
+    static map<uint32_t, VnetBridgeInfo> bridgeInfoMap_;
 
     uint32_t vnet_id_;
-    sai_object_id_t bridge_id_;
-    sai_object_id_t bridge_port_rif_id_;
-    sai_object_id_t bridge_port_tunnel_id_;
-    sai_object_id_t rif_id_;
 };
 
 typedef std::unique_ptr<VNetObject> VNetObject_T;
