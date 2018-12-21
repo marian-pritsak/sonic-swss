@@ -677,12 +677,6 @@ bool VNetBitmapObject::addIntf(Port& port, IpPrefix *prefix)
         gIntfsOrch->addIp2MeRoute(gVirtualRouterId, *prefix);
     }
 
-    if (gIntfsOrch->getSyncdIntfses().size() != 32)
-    {
-        SWSS_LOG_ERROR("marianp size %lu", gIntfsOrch->getSyncdIntfses().size());
-        return false;
-    }
-
     attr.id = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ATTR_ACTION;
     attr.value.s32 = SAI_TABLE_TUNNEL_ROUTE_ENTRY_ACTION_TO_LOCAL;
     attrs.push_back(attr);
