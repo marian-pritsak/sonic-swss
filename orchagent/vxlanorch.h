@@ -10,6 +10,7 @@
 
 extern sai_object_id_t gSwitchId;
 extern sai_object_id_t  gUnderlayIfId;
+extern sai_object_id_t  gVirtualRouterId;
 
 enum class MAP_T
 {
@@ -29,7 +30,8 @@ struct tunnel_ids_t
     sai_object_id_t tunnel_id;
     sai_object_id_t tunnel_term_id;
     sai_object_id_t switch_id;
-    sai_object_id_t underlay_rif;
+    sai_object_id_t underlay_rif_id;
+    sai_object_id_t virtual_router_id;
 };
 
 struct nh_key_t
@@ -83,7 +85,8 @@ public:
                 :tunnel_name_(name), src_ip_(srcIp), dst_ip_(dstIp)
     {
         ids_.switch_id = gSwitchId;
-        ids_.underlay_rif = gUnderlayIfId;
+        ids_.underlay_rif_id = gUnderlayIfId;
+        ids_.virtual_router_id = gVirtualRouterId;
     }
 
     bool isActive() const
@@ -91,7 +94,7 @@ public:
         return active_;
     }
 
-    bool setSwitch(sai_object_id_t switch_id, sai_object_id_t underlay_rif)
+    bool setSwitch(sai_object_id_t switch_id, sai_object_id_t underlay_rif_id, sai_object_id_t virtual_router_id)
     {
         if (isActive())
         {
@@ -99,7 +102,8 @@ public:
         }
 
         ids_.switch_id = switch_id;
-        ids_.underlay_rif = underlay_rif;
+        ids_.underlay_rif_id = underlay_rif_id;
+        ids_.virtual_router_id = virtual_router_id;
         return true;
     }
 
@@ -132,7 +136,17 @@ public:
 
     sai_object_id_t getUnderlayRifId() const
     {
-        return ids_.underlay_rif;
+        return ids_.underlay_rif_id;
+    }
+
+    sai_object_id_t getVirtualRouterId() const
+    {
+        return ids_.virtual_router_id;
+    }
+
+    IpAddress getTunnelIp() const
+    {
+        return src_ip_;
     }
 
     void updateNextHop(IpAddress& ipAddr, MacAddress macAddress, uint32_t vni, sai_object_id_t nhId);

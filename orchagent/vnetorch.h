@@ -26,7 +26,7 @@ const request_description_t vnet_appliance_description = {
         { "underlay_interface", REQ_T_STRING },
         { "capability",         REQ_T_STRING },
         { "weight",             REQ_T_UINT },
-        { "index",              REQ_T_UINT },
+        { "index",              REQ_T_STRING },
     },
     { "overlay_interface", "underlay_interface", "index" }
 };
@@ -63,7 +63,7 @@ public:
         return appliances_.at(name).switch_id;
     }
 
-    inline sai_object_id_t loopback_rif(string name) const
+    inline sai_object_id_t loopback_rif_id(string name) const
     {
         if (appliances_.find(name) == appliances_.end())
         {
@@ -73,12 +73,24 @@ public:
         return appliances_.at(name).loopback_rif_id;
     }
 
+    inline sai_object_id_t virtual_router_id(string name) const
+    {
+        if (appliances_.find(name) == appliances_.end())
+        {
+            return SAI_NULL_OBJECT_ID;
+        }
+
+        return appliances_.at(name).virtual_router_id;
+    }
+
     bool exists(string name) const
     {
         return appliances_.find(name) != appliances_.end();
     }
 
     bool redirectPortToOverlay(string appliance, const Port& port);
+    bool redirectIpToUnderlay(string appliance, const IpAddress& ip, uint32_t vni);
+    bool addVlan(string appliance, sai_vlan_id_t vlan_id, sai_object_id_t in_vrf_id, sai_object_id_t out_vrf_id);
 
 private:
     virtual bool addOperation(const Request& request);
@@ -89,7 +101,8 @@ private:
     VNetApplianceRequest request_;
     ApplianceMap appliances_;
 
-    sai_object_id_t acl_table_id_ = SAI_NULL_OBJECT_ID;
+    sai_object_id_t overlay_acl_table_id_ = SAI_NULL_OBJECT_ID;
+    sai_object_id_t underlay_acl_table_id_ = SAI_NULL_OBJECT_ID;
 };
 
 const request_description_t vnet_request_description = {

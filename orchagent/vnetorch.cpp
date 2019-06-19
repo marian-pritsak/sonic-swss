@@ -22,6 +22,7 @@
 
 extern sai_virtual_router_api_t* sai_virtual_router_api;
 extern sai_route_api_t* sai_route_api;
+extern sai_port_api_t* sai_port_api;
 extern sai_bridge_api_t* sai_bridge_api;
 extern sai_router_interface_api_t* sai_router_intfs_api;
 extern sai_fdb_api_t* sai_fdb_api;
@@ -30,6 +31,7 @@ extern sai_next_hop_api_t* sai_next_hop_api;
 extern sai_bmtor_api_t* sai_bmtor_api;
 extern sai_switch_api_t* sai_switch_api;
 extern sai_acl_api_t *sai_acl_api;
+extern sai_vlan_api_t *sai_vlan_api;
 extern PortsOrch *gPortsOrch;
 extern IntfsOrch *gIntfsOrch;
 extern NeighOrch *gNeighOrch;
@@ -1146,6 +1148,8 @@ bool VNetOrch::setIntf(const string& alias, const string name, const IpPrefix *p
 {
     SWSS_LOG_ENTER();
 
+    SWSS_LOG_ERROR(">>>>>>>>>>>>>>>>>>>> setIntf");
+
     if (!isVnetExists(name))
     {
         SWSS_LOG_WARN("VNET %s doesn't exist", name.c_str());
@@ -1265,19 +1269,32 @@ bool VNetOrch::addOperation(const Request& request)
                 create = true;
             }
 
+            VNetVrfObject *vrf_obj = dynamic_cast<VNetVrfObject*>(obj.get());
             if (!appliance.empty())
             {
                 auto switch_id = appliance_orch->switch_id(appliance);
-                auto loopback_rif = appliance_orch->loopback_rif(appliance);
+                auto loopback_rif_id = appliance_orch->loopback_rif_id(appliance);
+                auto virtual_router_id = appliance_orch->virtual_router_id(appliance);
                 auto *tunnelObj = vxlan_orch->getVxlanTunnel(tunnel);
-                if (!tunnelObj->setSwitch(switch_id, loopback_rif))
+                if (!tunnelObj->setSwitch(switch_id, loopback_rif_id, virtual_router_id))
                 {
                     SWSS_LOG_WARN("Failed to set tunnel %s switch id 0x%lx", tunnel.c_str(), switch_id);
                     return false;
                 }
+
+                if (!appliance_orch->addVlan(appliance, (sai_vlan_id_t)vni, vrf_obj->getVRidIngress(), vrf_obj->getVRidEgress()))
+                {
+                    SWSS_LOG_WARN("Failed to add vlan");
+                    return false;
+                }
+
+                if (!appliance_orch->redirectIpToUnderlay(appliance, tunnelObj->getTunnelIp(), vni))
+                {
+                    SWSS_LOG_WARN("failed to redirect to underlay");
+                    return false;
+                }
             }
 
-            VNetVrfObject *vrf_obj = dynamic_cast<VNetVrfObject*>(obj.get());
             if (!vxlan_orch->createVxlanTunnelMap(tunnel, TUNNEL_MAP_T_VIRTUAL_ROUTER, vni,
                                                   vrf_obj->getEncapMapId(), vrf_obj->getDecapMapId()))
             {
@@ -1848,14 +1865,94 @@ VNetApplianceOrch::VNetApplianceOrch(DBConnector *db, vector<string> &tableNames
 
 }
 
+bool VNetApplianceOrch::addVlan(string appliance, sai_vlan_id_t vlan_id, sai_object_id_t in_vrf_id, sai_object_id_t out_vrf_id)
+{
+    sai_attribute_t attr;
+    vector<sai_attribute_t> attrs;
+    sai_object_id_t vlan_oid, rif_oid;
+
+    attr.id = SAI_VLAN_ATTR_VLAN_ID;
+    attr.value.u16 = vlan_id;
+    attrs.push_back(attr);
+
+    sai_status_t status = sai_vlan_api->create_vlan(&vlan_oid,
+                                                    switch_id(appliance),
+                                                    (uint32_t)attrs.size(),
+                                                    attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create a VLAN, rv:%d", status);
+        throw std::runtime_error("Failed to create VLAN");
+    }
+
+    attrs.clear();
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
+    attr.value.oid = in_vrf_id;
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_SRC_MAC_ADDRESS;
+    memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
+    attr.value.s32 = SAI_ROUTER_INTERFACE_TYPE_VLAN;
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_VLAN_ID;
+    attr.value.oid = vlan_oid;
+    attrs.push_back(attr);
+
+    status = sai_router_intfs_api->create_router_interface(&rif_oid,
+                                                                        switch_id(appliance),
+                                                                        (uint32_t)attrs.size(),
+                                                                        attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create a VLAN, rv:%d", status);
+        throw std::runtime_error("Failed to create VLAN");
+    }
+
+    attrs.clear();
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
+    attr.value.oid = out_vrf_id;
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_SRC_MAC_ADDRESS;
+    memcpy(attr.value.mac, gMacAddress.getMac(), sizeof(sai_mac_t));
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_TYPE;
+    attr.value.s32 = SAI_ROUTER_INTERFACE_TYPE_VLAN;
+    attrs.push_back(attr);
+
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_VLAN_ID;
+    attr.value.oid = vlan_oid;
+    attrs.push_back(attr);
+
+    status = sai_router_intfs_api->create_router_interface(&rif_oid,
+                                                                        switch_id(appliance),
+                                                                        (uint32_t)attrs.size(),
+                                                                        attrs.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create a VLAN, rv:%d", status);
+        throw std::runtime_error("Failed to create VLAN");
+    }
+
+    return true;
+}
+
 bool VNetApplianceOrch::addOperation(const Request& request)
 {
     SWSS_LOG_ENTER();
 
     sai_attribute_t attr;
     vector<sai_attribute_t> attrs;
-    uint32_t index = 0;
+    string index;
     VNetApplianceInfo info;
+    SWSS_LOG_ERROR("<><><><><><><><><><><><>BEGIN, rv:");
 
     for (const auto& name: request.getAttrFieldNames())
     {
@@ -1869,7 +1966,7 @@ bool VNetApplianceOrch::addOperation(const Request& request)
         }
         else if (name == "index")
         {
-            index = static_cast<uint32_t>(request.getAttrUint(name));
+            index = request.getAttrString(name);
         }
         else
         {
@@ -1884,11 +1981,16 @@ bool VNetApplianceOrch::addOperation(const Request& request)
     attr.value.booldata = true;
     attrs.push_back(attr);
 
+    char c_str[32];
+
+    memcpy(c_str, index.c_str(), index.size() + 1);
+
     attr.id = SAI_SWITCH_ATTR_SWITCH_HARDWARE_INFO;
-    attr.value.u32 = index;
-    attr.value.s8list.count = 1;
+    attr.value.s8list.list = (int8_t *)c_str;
+    attr.value.s8list.count = (uint32_t)index.size() + 1;
     attrs.push_back(attr);
 
+    SWSS_LOG_ERROR("<><><><><><><><><><><><>BEFORE CREATE, rv:");
     sai_status_t status = sai_switch_api->create_switch(&info.switch_id,
             (uint32_t)attrs.size(),
             attrs.data());
@@ -1899,6 +2001,20 @@ bool VNetApplianceOrch::addOperation(const Request& request)
     }
 
     attrs.clear();
+
+    /* Get the default virtual router ID */
+    attr.id = SAI_SWITCH_ATTR_DEFAULT_VIRTUAL_ROUTER_ID;
+
+    status = sai_switch_api->get_switch_attribute(info.switch_id, 1, &attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Fail to get switch virtual router ID %d", status);
+        exit(EXIT_FAILURE);
+    }
+
+    info.virtual_router_id = attr.value.oid;
+
+    SWSS_LOG_NOTICE("Got default VR 0x%lx", attr.value.oid);
 
     attr.id = SAI_ROUTER_INTERFACE_ATTR_VIRTUAL_ROUTER_ID;
     attr.value.oid = info.virtual_router_id;
@@ -1957,7 +2073,7 @@ bool VNetApplianceOrch::redirectPortToOverlay(string appliance, const Port& port
     sai_attribute_t attr;
     vector<sai_attribute_t> rule_attrs;
     attr.id = SAI_ACL_ENTRY_ATTR_TABLE_ID;
-    attr.value.oid = acl_table_id_;
+    attr.value.oid = overlay_acl_table_id_;
     rule_attrs.push_back(attr);
 
     attr.id = SAI_ACL_ENTRY_ATTR_PRIORITY;
@@ -1987,6 +2103,90 @@ bool VNetApplianceOrch::redirectPortToOverlay(string appliance, const Port& port
         return false;
     }
 
+    attr.id = SAI_PORT_ATTR_INGRESS_ACL;
+    attr.value.oid = overlay_acl_table_id_;
+
+    status = sai_port_api->set_port_attribute(port.m_port_id, &attr);
+    if(status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("failed to set ACL table to port");
+        return false;
+    }
+
+    return true;
+}
+
+bool VNetApplianceOrch::redirectIpToUnderlay(string appliance, const IpAddress& ip, uint32_t vni)
+{
+    SWSS_LOG_ENTER();
+
+    if (!initAcl())
+    {
+        SWSS_LOG_ERROR("ACL initialization failed");
+    }
+
+    if (appliances_.find(appliance) == appliances_.end())
+    {
+        SWSS_LOG_ERROR("No Such appliance %s\n", appliance.c_str());
+        return false;
+    }
+
+    const auto& appliance_info = appliances_.at(appliance);
+    Port underlay_port;
+    if (!gPortsOrch->getPort(appliance_info.underlay_intf, underlay_port))
+    {
+        SWSS_LOG_ERROR("failed to get port\n");
+        return false;
+    }
+
+    /* Assuming for now that it's a port RIF */
+    sai_object_id_t rule_id = SAI_NULL_OBJECT_ID;
+    sai_attribute_t attr;
+    vector<sai_attribute_t> rule_attrs;
+    attr.id = SAI_ACL_ENTRY_ATTR_TABLE_ID;
+    attr.value.oid = underlay_acl_table_id_;
+    rule_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_ENTRY_ATTR_PRIORITY;
+    attr.value.u32 = 999;
+    rule_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_ENTRY_ATTR_ADMIN_STATE;
+    attr.value.booldata = true;
+    rule_attrs.push_back(attr);
+
+    sai_ip_address_t ip_addr;
+    copy(ip_addr, ip);
+    attr.id = SAI_ACL_ENTRY_ATTR_FIELD_DST_IP;
+    attr.value.aclfield.data.ip4 = ip_addr.addr.ip4;
+    attr.value.aclfield.mask.ip4 = 0xffffffff;
+    rule_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_ENTRY_ATTR_FIELD_L4_DST_PORT;
+    attr.value.aclfield.data.u16 = 4789;
+    attr.value.aclfield.mask.u16 = 0xffff;
+    rule_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_ENTRY_ATTR_FIELD_TUNNEL_VNI;
+    attr.value.aclfield.data.u32 = vni;
+    attr.value.aclfield.mask.u32 = 0xffffffff;
+    rule_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_ENTRY_ATTR_ACTION_REDIRECT;
+    attr.value.aclaction.enable = true;
+    attr.value.aclaction.parameter.oid = underlay_port.m_port_id;
+    rule_attrs.push_back(attr);
+
+    sai_status_t status = sai_acl_api->create_acl_entry(&rule_id,
+                                           gSwitchId,
+                                           (uint32_t)rule_attrs.size(),
+                                           rule_attrs.data());
+    if(status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("failed to create rule\n");
+        return false;
+    }
+
     return true;
 }
 
@@ -1994,13 +2194,14 @@ bool VNetApplianceOrch::initAcl(void)
 {
     SWSS_LOG_ENTER();
 
-    if (acl_table_id_ != SAI_NULL_OBJECT_ID)
+    if (overlay_acl_table_id_ != SAI_NULL_OBJECT_ID)
     {
         return true;
     }
 
     vector<sai_attribute_t> table_attrs;
     sai_attribute_t attr;
+
     vector<int32_t> bpoint_list = { SAI_ACL_BIND_POINT_TYPE_PORT, SAI_ACL_BIND_POINT_TYPE_LAG };
     attr.id = SAI_ACL_TABLE_ATTR_ACL_BIND_POINT_TYPE_LIST;
     attr.value.s32list.count = static_cast<uint32_t>(bpoint_list.size());
@@ -2019,7 +2220,46 @@ bool VNetApplianceOrch::initAcl(void)
     attr.value.u32 = 64;
     table_attrs.push_back(attr);
 
-    sai_status_t status = sai_acl_api->create_acl_table(&acl_table_id_,
+    sai_status_t status = sai_acl_api->create_acl_table(&overlay_acl_table_id_,
+                                           gSwitchId,
+                                           (uint32_t)table_attrs.size(),
+                                           table_attrs.data());
+    if(status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create acl table: %d\n", status);
+        return false;
+    }
+
+    auto port_map = gPortsOrch->getAllPorts();
+
+    table_attrs.clear();
+
+    attr.id = SAI_ACL_TABLE_ATTR_ACL_BIND_POINT_TYPE_LIST;
+    attr.value.s32list.count = static_cast<uint32_t>(bpoint_list.size());
+    attr.value.s32list.list = bpoint_list.data();
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_DST_IP;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_FIELD_TUNNEL_VNI;
+    attr.value.booldata = true;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_ACL_STAGE;
+    attr.value.s32 = SAI_ACL_STAGE_INGRESS;
+    table_attrs.push_back(attr);
+
+    attr.id = SAI_ACL_TABLE_ATTR_SIZE;
+    attr.value.u32 = 64;
+    table_attrs.push_back(attr);
+
+    status = sai_acl_api->create_acl_table(&underlay_acl_table_id_,
                                            gSwitchId,
                                            (uint32_t)table_attrs.size(),
                                            table_attrs.data());
@@ -2028,6 +2268,22 @@ bool VNetApplianceOrch::initAcl(void)
     {
         SWSS_LOG_ERROR("Failed to create acl table: %d\n", status);
         return false;
+    }
+
+    for (const auto& kv: port_map)
+    {
+        const Port& port = kv.second;
+        attr.id = SAI_PORT_ATTR_INGRESS_ACL;
+        attr.value.oid = underlay_acl_table_id_;
+
+        if (port.m_type == Port::PHY) {
+            status = sai_port_api->set_port_attribute(port.m_port_id, &attr);
+            if(status != SAI_STATUS_SUCCESS)
+            {
+                SWSS_LOG_ERROR("failed to set ACL table to port");
+                return false;
+            }
+        }
     }
 
     return true;

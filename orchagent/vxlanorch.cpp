@@ -16,7 +16,6 @@
 #include "swssnet.h"
 
 /* Global variables */
-extern sai_object_id_t gVirtualRouterId;
 extern sai_tunnel_api_t *sai_tunnel_api;
 extern sai_next_hop_api_t *sai_next_hop_api;
 extern Directory<Orch*> gDirectory;
@@ -350,7 +349,7 @@ bool VxlanTunnel::createTunnel(MAP_T encap, MAP_T decap)
             ip = &ips;
         }
 
-        ids_.tunnel_id = create_tunnel(ids_.tunnel_encap_id, ids_.tunnel_decap_id, ids_.switch_id, ip, ids_.underlay_rif);
+        ids_.tunnel_id = create_tunnel(ids_.tunnel_encap_id, ids_.tunnel_decap_id, ids_.switch_id, ip, ids_.underlay_rif_id);
 
         ip = nullptr;
         if (!dst_ip_.isZero())
@@ -359,7 +358,7 @@ bool VxlanTunnel::createTunnel(MAP_T encap, MAP_T decap)
             ip = &ipd;
         }
 
-        ids_.tunnel_term_id = create_tunnel_termination(ids_.tunnel_id, ids_.switch_id, ips, ip, gVirtualRouterId);
+        ids_.tunnel_term_id = create_tunnel_termination(ids_.tunnel_id, ids_.switch_id, ips, ip, ids_.virtual_router_id);
         active_ = true;
         tunnel_map_ = { encap, decap };
     }
